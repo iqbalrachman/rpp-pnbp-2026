@@ -1,316 +1,461 @@
 /* ============================================================================
- * data.js — pure data layer for RPP PNBP BMKG 2026
- * No DOM, no framework. Safe to import from node for testing.
+ * app.js — UI + loading orchestration for RPP PNBP BMKG 2026
  * ==========================================================================*/
+import {
+  CONFIG, rppSources, hapusSources,
+  parseCSV, gvizToRows, normRpp, normPP47,
+  hierarchy, classifyTarif, fmtTarif, percentChange,
+  resolveUke, sortRows, computeStats,
+} from './data.js';
 
-export const CONFIG = {
-  // Primary workbook (DATA_DUKUNG) — supports gviz + JSONP
-  DATA_DUKUNG_ID: '1WkxCayIVb0I4AjCscD2ICFQDWh2eBiDwnroi4usIsLs',
-  // "Publish to web" ids (CORS enabled: Access-Control-Allow-Origin: *)
-  PUB_RPP: '2PACX-1vQio69IIRv2PuVTLX-s0rCs1dlBC2JEkoYIc6-6QdRTo990YeaY_ejlyS0sDSLm7n9B-VGnK-DRg3Mz',
-  PUB_HAPUS: '2PACX-1vQl8WD78QiZyVbKSJe6uP0h2jFmJig16b4LG-GLgB8zmg9KmpggcYVkAD_BA7U6TtUa3ZVzSdi5vxnf',
-  // Human links (for empty-state / provenance)
-  RPP_SHEET_URL: 'https://docs.google.com/spreadsheets/d/1WkxCayIVb0I4AjCscD2ICFQDWh2eBiDwnroi4usIsLs/edit',
-  HAPUS_SHEET_URL: 'https://docs.google.com/spreadsheets/d/1vYuEb3PUA7UVfamqrWwhjXMvXstAihYfwSEG7fcscAE/edit',
-  RPP_SHEET_NAME: 'DATA_DUKUNG',
+const state = {
+  rpp: [], hapus: [], oldMap: {},
+  visible: [],
+  ukeList: [],
+  loading: true,
+  loaded: { rpp: null, hapus: null },
+  usingSnapshot: false, snapshotAt: null,
+  stats: null,
+  filters: { q: '', uke: new Set(), kategori: 'SEMUA', showHapus: false },
 };
 
-/* ---------------------------------------------------------------------------
- * Source candidates. Each entry: { id, label, kind: 'jsonp'|'fetch', format }
- * Tried in order; first one that yields usable rows wins.
- * -------------------------------------------------------------------------*/
-export function rppSources() {
-  const d = CONFIG.DATA_DUKUNG_ID;
-  const gviz = `https://docs.google.com/spreadsheets/d/${d}/gviz/tq`;
-  return [
-    { id: 'gviz-jsonp', label: 'gviz JSON (JSONP)', kind: 'jsonp', format: 'json',
-      url: `${gviz}?tqx=out:json&sheet=${CONFIG.RPP_SHEET_NAME}` },
-    { id: 'pub-csv', label: 'Published CSV (CORS ok)', kind: 'fetch', format: 'csv',
-      url: `https://docs.google.com/spreadsheets/d/e/${CONFIG.PUB_RPP}/pub?output=csv&gid=0` },
-    { id: 'gviz-json', label: 'gviz JSON (fetch)', kind: 'fetch', format: 'json',
-      url: `${gviz}?tqx=out:json&sheet=${CONFIG.RPP_SHEET_NAME}` },
-    { id: 'gviz-csv', label: 'gviz CSV (fetch)', kind: 'fetch', format: 'csv',
-      url: `${gviz}?tqx=out:csv&sheet=${CONFIG.RPP_SHEET_NAME}` },
-    { id: 'export-csv', label: 'Export CSV (fetch)', kind: 'fetch', format: 'csv',
-      url: `https://docs.google.com/spreadsheets/d/${d}/export?format=csv&sheet=${CONFIG.RPP_SHEET_NAME}` },
-  ];
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+async function fetchText(url, timeout = 15000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url, { mode: 'cors', redirect: 'follow', signal: ctrl.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.text();
+  } finally { clearTimeout(t); }
 }
 
-// HAPUS detail: only the published (CORS) copy is reachable; gviz 404s on /d/e/.
-// We still loop gid 0..10 as the spec requires, and stop at the first usable tab.
-export function hapusSources() {
-  const out = [];
-  for (let gid = 0; gid <= 10; gid++) {
-    out.push({
-      id: `pub-csv-gid${gid}`,
-      label: `Published CSV gid=${gid}`,
-      kind: 'fetch',
-      format: 'csv',
-      url: `https://docs.google.com/spreadsheets/d/e/${CONFIG.PUB_HAPUS}/pub?output=csv&gid=${gid}`,
-    });
-  }
-  return out;
-}
-
-/* ---------------------------------------------------------------------------
- * CSV parser (RFC 4180: quotes, "" escapes, embedded newlines).
- * -------------------------------------------------------------------------*/
-export function parseCSV(text) {
-  const rows = [];
-  let row = [], cur = '', inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQ) {
-      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
-      else cur += ch;
-    } else {
-      if (ch === '"') inQ = true;
-      else if (ch === ',') { row.push(cur); cur = ''; }
-      else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
-      else if (ch === '\r') { /* skip */ }
-      else cur += ch;
-    }
-  }
-  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
-  return rows;
-}
-
-/* gviz JSON -> array-of-arrays, using the *formatted* value `f` when present.
- * This is the critical fix for scientific-notation numbers (ID_LAMA). */
-export function gvizToRows(json) {
-  const rows = (json && json.table && json.table.rows) || [];
-  return rows.map((r) => (r.c || []).map((c) => {
-    if (!c) return '';
-    if (c.f !== undefined && c.f !== null && c.f !== '') return String(c.f);
-    if (c.v === undefined || c.v === null) return '';
-    return String(c.v);
-  }));
-}
-
-/* ---------------------------------------------------------------------------
- * Column indices — identical for the gviz feed and the published CSV
- * (both carry a leading blank column A).
- * -------------------------------------------------------------------------*/
-export const DD = {
-  NO: 1, ID_LAMA: 2, ID_BARU: 3, UKE: 4, KATEGORI: 5, JENIS: 6, SUBJENIS: 7,
-  NAMA: 8, DETIL: 9, SATUAN: 10, TARIF: 11, OUTPUT: 12, HUKUM: 13,
-  DESKRIPSI: 14, PENGGUNA: 15, RATA3: 16, PROYEKSI: 17, PENDAPATAN: 18,
-  BENCH: 19, LINK: 20,
-};
-
-const KATEGORI_SET = new Set(['BARU', 'UBAH', 'TETAP', 'HAPUS']);
-
-/* Normalize an old-service id. The source has real quirks:
- *   "0"           -> sentinel used on BARU rows (means "none")
- *   "120180047000156." -> stray trailing dot
- *   "120180047000038A" -> variant with a letter suffix
- * Returns '' when the value is not a usable id. */
-export function normId(s) {
-  const v = String(s == null ? '' : s).trim().replace(/\.$/, '');
-  return /^\d{6,}[A-Z]?$/.test(v) ? v : '';
-}
-const cell = (r, i) => String((r && r[i] != null ? r[i] : '')).replace(/\u00a0/g, ' ').trim();
-
-/* DATA_DUKUNG rows -> normalized RPP rows (154). Never invents a row. */
-export function normRpp(rows) {
-  const out = [];
-  for (const r of rows) {
-    if (!r) continue;
-    const kategori = cell(r, DD.KATEGORI).toUpperCase();
-    const idBaru = cell(r, DD.ID_BARU);
-    const idLama = normId(cell(r, DD.ID_LAMA));
-    // Header guard: skip the label row and any non-data rows.
-    if (!KATEGORI_SET.has(kategori)) continue;
-    if (!/^\d+$/.test(idBaru) && !idLama) continue;
-    out.push({
-      type: 'rpp',
-      no: cell(r, DD.NO),
-      idBaru: /^\d+$/.test(idBaru) ? Number(idBaru) : null,
-      idLama,
-      kategori,
-      uke: cell(r, DD.UKE),
-      jenis: cell(r, DD.JENIS),
-      subjenis: cell(r, DD.SUBJENIS),
-      nama: cell(r, DD.NAMA),
-      detil: cell(r, DD.DETIL),
-      satuan: cell(r, DD.SATUAN),
-      tarif: cell(r, DD.TARIF),
-      output: cell(r, DD.OUTPUT),
-      hukum: cell(r, DD.HUKUM),
-      deskripsi: cell(r, DD.DESKRIPSI),
-      pengguna: cell(r, DD.PENGGUNA),
-      rata3: cell(r, DD.RATA3),
-      proyeksi: cell(r, DD.PROYEKSI),
-      pendapatan: cell(r, DD.PENDAPATAN),
-      bench: cell(r, DD.BENCH),
-      link: cell(r, DD.LINK),
-    });
-  }
-  return out;
-}
-
-/* PP47-2018 rows -> { oldMap, hapusList }
- * gid 0 is the SEBELUM/MENJADI sheet with columns:
- *   A=ID_LAMA  B..E=nama lama  F=SATUAN_LAMA  G=TARIF_LAMA
- *   I=ID_BARU  S=UKE_II  T=KET  P=alasan HAPUS  X=penjelasan
- * Hierarchy cells are merged in the sheet, so we forward-fill B..D. */
-export function normPP47(rows) {
-  const oldMap = Object.create(null);
-  const hapusList = [];
-  if (!rows || !rows.length) return { oldMap, hapusList };
-
-  // locate the header row (contains "ID_LAMA")
-  let h = -1;
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    if ((rows[i] || []).some((c) => /^ID_LAMA$/i.test(cell([c], 0)))) { h = i; break; }
-  }
-  if (h === -1) h = 0;
-
-  let fillB = '', fillC = '', fillD = '';
-  for (let i = h + 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r) continue;
-    if (cell(r, 1)) fillB = cell(r, 1);
-    if (cell(r, 2)) fillC = cell(r, 2);
-    if (cell(r, 3)) fillD = cell(r, 3);
-    const idLama = normId(cell(r, 0));
-    if (!idLama) continue; // skip blank / non-id rows
-    const tarifLama = cell(r, 6);
-    const satuanLama = cell(r, 5);
-    const namaE = cell(r, 4);
-    const namaParts = [cell(r, 1), cell(r, 2), cell(r, 3), namaE].filter(Boolean);
-    const rec = {
-      idLama,
-      namaLama: cell(r, 4) || fillD || fillC || fillB || idLama,
-      pathLama: [fillB, fillC, fillD, namaE].filter((v, idx, a) => v && a.indexOf(v) === idx),
-      satuanLama,
-      tarifLama,
-      ukeLama: cell(r, 18),
-      ket: cell(r, 19),
-      alasan: cell(r, 15),          // column P
-      penjelasan: cell(r, 23),      // column X
+function loadJsonp(url, timeout = 12000) {
+  return new Promise((resolve, reject) => {
+    const cb = '__gvizCb_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
     };
-    const isLeaf = !!(tarifLama || satuanLama);
-    if (isLeaf) oldMap[idLama] = rec;
-    if (/^DIHAPUS/i.test(rec.alasan)) hapusList.push({ type: 'hapus', ...rec });
-  }
-  return { oldMap, hapusList };
+    const timer = setTimeout(() => { if (!settled) { settled = true; cleanup(); reject(new Error('timeout')); } }, timeout);
+    window[cb] = (data) => { if (settled) return; settled = true; cleanup(); resolve(data); };
+    script.onerror = () => { if (!settled) { settled = true; cleanup(); reject(new Error('script load error')); } };
+    script.src = url.replace('out:json', 'out:json;responseHandler:' + cb);
+    document.head.appendChild(script);
+  });
 }
 
-/* ---------------------------------------------------------------------------
- * Bottom-up hierarchy (spec §3)
- * -------------------------------------------------------------------------*/
-export function hierarchy(row) {
-  const jenis = row.jenis || '';
-  const subjenis = row.subjenis || '';
-  const nama = row.nama || '';
-  const detil = row.detil || '';
-  if (detil) return { level: 4, leaf: detil, parents: [jenis, subjenis, nama].filter(Boolean) };
-  if (nama) return { level: 3, leaf: nama, parents: [jenis, subjenis].filter(Boolean) };
-  if (subjenis) return { level: 2, leaf: subjenis, parents: [jenis].filter(Boolean) };
-  return { level: 1, leaf: jenis || '—', parents: [] };
+function jsonFromGvizText(text) {
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b < 0) throw new Error('bentuk respons tidak dikenal');
+  return JSON.parse(text.slice(a, b + 1));
 }
 
-/* ---------------------------------------------------------------------------
- * Tarif parsing / formatting (spec §6)
- * Types: rupiah, percent, other, none
- * -------------------------------------------------------------------------*/
-export function classifyTarif(s) {
-  const t = String(s == null ? '' : s).trim();
-  if (!t || t === '-') return { type: 'none', raw: t };
-  if (/^[\d.,]+\s*%$/.test(t)) return { type: 'percent', raw: t, num: parseFloat(t.replace(',', '.')) };
-  const m = t.match(/Rp\s*([\d.,]+)/i);
-  if (m) {
-    const num = Number(m[1].replace(/[.,]/g, ''));
-    if (!isNaN(num)) return { type: 'rp', raw: t, num };
-  }
-  return { type: 'other', raw: t };
-}
-
-export function fmtTarif(t) {
-  if (!t) return '';
-  if (t.type === 'rp') return 'Rp' + t.num.toLocaleString('id-ID');
-  if (t.type === 'percent') return (Number.isInteger(t.num) ? t.num : t.num.toFixed(2).replace(/\.?0+$/, '')) + '%';
-  return t.raw;
-}
-
-// % change between old and new tarif, only when both are the same numeric kind
-export function percentChange(oldT, newT) {
-  if (!oldT || !newT) return null;
-  if (oldT.type === 'rp' && newT.type === 'rp' && oldT.num > 0) {
-    return Math.round(((newT.num - oldT.num) / oldT.num) * 1000) / 10;
-  }
-  return null;
-}
-
-/* Group key used for UKE inheritance (spec §4) */
-export function groupKey(row) {
-  return `${row.jenis || ''}||${row.subjenis || ''}`;
-}
-
-/* Resolve UKE badges for a display-ordered list.
- * - explicit UKE -> solid badge
- * - empty -> inherit last non-empty within the same Jenis+Subjenis group
- *   (italic, 60% opacity, tooltip in the renderer) */
-export function resolveUke(list) {
-  const lastByGroup = new Map();
-  let lastUke = '';
-  return list.map((row) => {
-    const explicit = (row.uke || row.ukeLama || '').trim();
-    if (explicit) {
-      lastUke = explicit;
-      lastByGroup.set(groupKey(row), explicit);
-      return { uke: explicit, inherited: false };
+async function loadRpp() {
+  const attempts = [];
+  for (const src of rppSources()) {
+    try {
+      let rows;
+      if (src.kind === 'jsonp') {
+        const json = await loadJsonp(src.url);
+        rows = gvizToRows(json);
+      } else {
+        const text = await fetchText(src.url);
+        rows = src.format === 'json' ? gvizToRows(jsonFromGvizText(text)) : parseCSV(text);
+      }
+      const rpp = normRpp(rows);
+      if (!rpp.length) throw new Error('0 baris valid');
+      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: rpp.length });
+      return { rpp, source: src, attempts };
+    } catch (e) {
+      attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
     }
-    const g = groupKey(row);
-    const fromGroup = lastByGroup.get(g) || lastUke;
-    return { uke: fromGroup || '', inherited: !!fromGroup };
-  });
-}
-
-/* ---------------------------------------------------------------------------
- * Sorting (spec §5): default ID_BARU asc numeric;
- * when HAPUS is shown -> ID_LAMA asc as 15-digit string (BigInt-safe).
- * Rows without ID_LAMA keep their ID_BARU order, placed after.
- * -------------------------------------------------------------------------*/
-export function sortRows(list, showHapus) {
-  const arr = list.slice();
-  if (!showHapus) {
-    arr.sort((a, b) => (a.idBaru == null ? 1e9 : a.idBaru) - (b.idBaru == null ? 1e9 : b.idBaru));
-    return arr;
   }
-  arr.sort((a, b) => {
-    const al = a.idLama || '', bl = b.idLama || '';
-    if (al && bl) return al < bl ? -1 : al > bl ? 1 : 0;
-    if (al && !bl) return -1;
-    if (!al && bl) return 1;
-    return (a.idBaru == null ? 1e9 : a.idBaru) - (b.idBaru == null ? 1e9 : b.idBaru);
-  });
-  return arr;
+  return { rpp: [], source: null, attempts };
 }
 
-/* Aggregate stats used by the hero (computed from real rows, never hardcoded) */
-export function computeStats(rpp, hapusList, semulaIds) {
-  const c = { BARU: 0, UBAH: 0, TETAP: 0 };
-  const oldIds = new Set();
-  rpp.forEach((r) => {
-    if (c[r.kategori] != null) c[r.kategori]++;
-    if ((r.kategori === 'UBAH' || r.kategori === 'TETAP') && r.idLama) oldIds.add(r.idLama);
-  });
-  hapusList.forEach((h) => { if (h.idLama) oldIds.add(h.idLama); });
-  // SEMULA = the full universe of old PP47 leaf services (authoritative when supplied).
-  const semula = Array.isArray(semulaIds) && semulaIds.length ? semulaIds.length : oldIds.size;
-  const totals = {
-    rpp: rpp.length,
-    baru: c.BARU, ubah: c.UBAH, tetap: c.TETAP,
-    hapus: hapusList.length,
-    semula,
-  };
-  totals.pct = {
-    baru: totals.semula ? Math.round((totals.baru / totals.semula) * 100) : 0,
-    ubah: totals.semula ? Math.round((totals.ubah / totals.semula) * 100) : 0,
-    tetap: totals.semula ? Math.round((totals.tetap / totals.semula) * 100) : 0,
-    hapus: totals.semula ? Math.round((totals.hapus / totals.semula) * 100) : 0,
-  };
-  return totals;
+async function loadHapus() {
+  const attempts = [];
+  for (const src of hapusSources()) {
+    try {
+      const text = await fetchText(src.url);
+      const { oldMap, hapusList } = normPP47(parseCSV(text));
+      if (!hapusList.length) throw new Error('tidak ada kolom HAPUS / ID_LAMA');
+      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: hapusList.length });
+      return { oldMap, hapusList, source: src, attempts };
+    } catch (e) {
+      attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
+    }
+  }
+  return { oldMap: {}, hapusList: [], source: null, attempts };
 }
+
+async function loadAll() {
+  state.loading = true;
+  renderStatus();
+  let [r, h] = await Promise.all([loadRpp(), loadHapus()]);
+
+  let snap = null;
+  if (!r.rpp.length || !h.hapusList.length) {
+    try { snap = await fetch('./snapshot.json', { cache: 'no-store' }).then((x) => {
+      if (!x.ok) throw new Error('HTTP ' + x.status); return x.json();
+    }); } catch (e) { snap = null; }
+  }
+  if (snap) {
+    if (!r.rpp.length && Array.isArray(snap.rpp) && snap.rpp.length) {
+      r = { rpp: snap.rpp, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
+            attempts: [...r.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.rpp.length }] };
+      state.usingSnapshot = true;
+    }
+    if (!h.hapusList.length && Array.isArray(snap.hapus) && snap.hapus.length) {
+      h = { oldMap: snap.oldMap || {}, hapusList: snap.hapus, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
+            attempts: [...h.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.hapus.length }] };
+      state.usingSnapshot = true;
+    }
+    state.snapshotAt = snap.capturedAt || null;
+  }
+
+  state.rpp = r.rpp;
+  state.hapus = h.hapusList;
+  state.oldMap = h.oldMap;
+  state.loaded = {
+    rpp: { source: r.source, attempts: r.attempts },
+    hapus: { source: h.source, attempts: h.attempts },
+  };
+  state.ukeList = [...new Set(
+    [...state.rpp.map((x) => x.uke), ...state.hapus.map((x) => x.ukeLama)]
+      .map((v) => (v || '').trim()).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+  state.stats = computeStats(state.rpp, state.hapus, Object.keys(state.oldMap));
+  state.loading = false;
+  buildUkeFilter();
+  renderHero();
+  renderTable();
+  renderFooter();
+  renderStatus();
+  renderNotice();
+}
+
+function renderNotice() {
+  const el = $('#notice'); if (!el) return;
+  if (!state.usingSnapshot) { el.hidden = true; el.innerHTML = ''; return; }
+  const when = state.snapshotAt ? new Date(state.snapshotAt).toLocaleString('id-ID') : '—';
+  el.hidden = false;
+  el.innerHTML = '&#9888;&#65039; Sumber langsung tidak dapat dijangkau, sehingga tabel memuat ' +
+    '<b>snapshot data asli</b> (diambil ' + esc(when) + '). Tekan <b>Muat ulang</b> untuk mencoba live lagi.';
+}
+
+function iconFor(row) {
+  const text = [row.jenis, row.subjenis, row.nama, row.detil, row.namaLama, row.pathLama && row.pathLama.join(' ')]
+    .filter(Boolean).join(' ').toLowerCase();
+  if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '✈️';
+  if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '🌊';
+  if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '🌋';
+  if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '🌡️';
+  return '🌤️';
+}
+
+function katBadge(kat) {
+  const map = {
+    BARU: 'badge-green', UBAH: 'badge-amber', TETAP: 'badge-blue', HAPUS: 'badge-red',
+  };
+  return `<span class="badge ${map[kat] || ''}">${esc(kat)}</span>`;
+}
+
+function currentRows() {
+  const f = state.filters;
+  const q = f.q.trim().toLowerCase();
+  let base = state.filters.showHapus ? [...state.rpp, ...state.hapus] : state.rpp.slice();
+  const ukeResolved = resolveUke(base);
+
+  const out = [];
+  base.forEach((row, i) => {
+    const info = ukeResolved[i];
+    if (f.uke.size && !f.uke.has(info.uke)) return;
+    if (f.kategori !== 'SEMUA') {
+      if (row.type === 'hapus' || row.kategori !== f.kategori) return;
+    }
+    if (q) {
+      const hay = [
+        row.jenis, row.subjenis, row.nama, row.detil,
+        row.namaLama, (row.pathLama || []).join(' '),
+        row.idBaru != null ? String(row.idBaru) : '', row.idLama, row.tarif, row.uke,
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+    out.push({ row, uke: info.uke, inherited: info.inherited });
+  });
+  return { items: out, raw: base, ukeResolved };
+}
+
+function renderHero() {
+  const s = state.stats || { semula: 0, rpp: 0, baru: 0, ubah: 0, tetap: 0, hapus: 0, pct: {} };
+  const sum = (s.baru + s.ubah + s.tetap + s.hapus) || 1;
+  const seg = (n, cls) => `<span class="seg ${cls}" style="width:${(n / sum) * 100}%"></span>`;
+  $('#pills').innerHTML = `
+    <span class="pill pill-total"><b>${s.semula}</b> SEMULA</span>
+    <span class="pill"><b>${s.rpp}</b> RPP</span>
+    <span class="pill pill-green"><b>${s.baru}</b> BARU</span>
+    <span class="pill pill-amber"><b>${s.ubah}</b> UBAH</span>
+    <span class="pill pill-blue"><b>${s.tetap}</b> TETAP</span>
+    <span class="pill pill-red"><b>${s.hapus}</b> HAPUS</span>`;
+  $('#progress').innerHTML =
+    seg(s.baru, 'seg-green') + seg(s.ubah, 'seg-amber') + seg(s.tetap, 'seg-blue') + seg(s.hapus, 'seg-red');
+}
+
+function buildUkeFilter() {
+  const box = $('#ukeMenuItems');
+  box.innerHTML = state.ukeList.map((u) =>
+    `<label class="chk"><input type="checkbox" value="${esc(u)}" ${state.filters.uke.has(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`
+  ).join('');
+  box.querySelectorAll('input').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      if (inp.checked) state.filters.uke.add(inp.value); else state.filters.uke.delete(inp.value);
+      updateUkeLabel(); renderTable();
+    });
+  });
+  updateUkeLabel();
+}
+function updateUkeLabel() {
+  const n = state.filters.uke.size;
+  $('#ukeBtn').textContent = n ? `UKE II (${n})` : 'UKE II (semua)';
+}
+
+function tarifCell(row) {
+  if (row.type === 'hapus') {
+    const t = classifyTarif(row.tarifLama);
+    return `<div class="tarif"><s class="t-red">${esc(fmtTarif(t) || '—')}</s>` +
+      (row.satuanLama ? `<span class="satuan">${esc(row.satuanLama)}</span>` : '') + `</div>`;
+  }
+  const nt = classifyTarif(row.tarif);
+  const newTxt = fmtTarif(nt) || '—';
+  if (row.kategori === 'BARU') {
+    return `<div class="tarif"><span class="t-old">—</span><span class="arrow">&rarr;</span>` +
+      `<b class="t-green">${esc(newTxt)}</b>` +
+      (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
+  }
+  if (row.kategori === 'UBAH') {
+    const oldRec = state.oldMap[row.idLama];
+    const oldT = oldRec ? classifyTarif(oldRec.tarifLama) : null;
+    const pc = oldT ? percentChange(oldT, nt) : null;
+    let badge = '';
+    if (pc != null) {
+      const up = pc > 0;
+      badge = `<span class="chip ${up ? 'chip-up' : (pc < 0 ? 'chip-down' : 'chip-flat')}">${up ? '+' : ''}${pc}%</span>`;
+    } else if (oldT && oldT.raw) {
+      badge = `<span class="chip chip-flat">dari ${esc(fmtTarif(oldT))}</span>`;
+    }
+    return `<div class="tarif"><b class="t-amber">${esc(newTxt)}</b>${badge}` +
+      (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
+  }
+  return `<div class="tarif"><b class="t-blue">${esc(newTxt)}</b>` +
+    `<span class="chip chip-flat">0%</span>` +
+    (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
+}
+
+function idCell(row) {
+  if (row.type === 'hapus') {
+    return `<div class="idcol"><div class="idbaru id-hapus">${esc(row.idLama)}</div></div>`;
+  }
+  const bar = row.idBaru != null ? `<div class="idbaru">ID: ${esc(row.idBaru)}</div>` : '';
+  const lama = row.idLama ? `<div class="idlama">&#9492;&#9472; ${esc(row.idLama)}</div>` : '';
+  return `<div class="idcol">${bar}${lama}</div>`;
+}
+
+function hierCell(row) {
+  const icon = `<span class="icon">${iconFor(row)}</span>`;
+  if (row.type === 'hapus') {
+    const path = (row.pathLama || []).join(' &rsaquo; ');
+    return `<div class="hier">${icon}<span class="parents">${esc(path)}</span>` +
+      `<span class="leaf leaf-hapus">${esc(row.namaLama)}</span></div>`;
+  }
+  const h = hierarchy(row);
+  const parents = h.parents.map((p) => esc(p)).join(' <i>&rsaquo;</i> ');
+  return `<div class="hier">${icon}` +
+    (parents ? `<span class="parents">${parents} <i>&rsaquo;</i> </span>` : '') +
+    `<span class="leaf">${esc(h.leaf)}</span></div>`;
+}
+
+function rowHtml(item) {
+  const { row, uke, inherited } = item;
+  const isHapus = row.type === 'hapus';
+  const cls = isHapus ? 'row row-hapus' : 'row';
+  const ukePill = uke
+    ? `<span class="ukepill ${inherited ? 'uke-inherited' : ''}" title="${inherited ? 'Inherited from above' : 'UKE II: ' + esc(uke)}">${esc(uke)}</span>`
+    : `<span class="uke-empty">—</span>`;
+  const kat = isHapus ? katBadge('HAPUS') : katBadge(row.kategori);
+  const act = isHapus
+    ? `<button class="act act-hapus" data-act="hapus" title="Penjelasan HAPUS (PP 47/2018)">${ICON_FILE}</button>`
+    : `<button class="act" data-act="rpp" title="Detail 7 field">${ICON_EYE}</button>`;
+  return `<tr class="${cls}" data-key="${esc(keyOf(row))}">` +
+    `<td class="td-id">${idCell(row)}</td>` +
+    `<td class="td-hier">${hierCell(row)}</td>` +
+    `<td class="td-uke">${ukePill}</td>` +
+    `<td class="td-kat">${kat}</td>` +
+    `<td class="td-tarif">${tarifCell(row)}</td>` +
+    `<td class="td-act">${act}</td></tr>`;
+}
+
+const ICON_EYE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>';
+
+function keyOf(row) {
+  return row.type === 'hapus' ? 'H:' + row.idLama : 'R:' + (row.idBaru != null ? row.idBaru : row.idLama);
+}
+
+function renderTable() {
+  const { items } = currentRows();
+  const sorted = sortRows(items.map((x) => x.row), state.filters.showHapus);
+  const byKey = new Map(items.map((x) => [keyOf(x.row), x]));
+  state.visible = sorted.map((r) => byKey.get(keyOf(r))).filter(Boolean);
+
+  const tbody = $('#tbody');
+  if (state.loading) {
+    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Memuat data…</td></tr>`;
+    return;
+  }
+  if (!state.rpp.length) { renderEmpty(); return; }
+  if (!state.visible.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Tidak ada baris yang cocok dengan filter.</td></tr>`;
+    $('#count').textContent = '0 baris';
+    return;
+  }
+  tbody.innerHTML = state.visible.map(rowHtml).join('');
+  $('#count').textContent = `${state.visible.length} baris`;
+}
+
+function openDrawer(kind, row) {
+  const body = $('#drawerBody');
+  if (kind === 'rpp') {
+    const h = hierarchy(row);
+    const tarifTxt = (fmtTarif(classifyTarif(row.tarif)) || '—') + (row.satuan ? ' · ' + row.satuan : '');
+    $('#drawerTitle').textContent = 'Detail Layanan RPP';
+    $('#drawerSub').innerHTML = esc(h.leaf) + katBadge(row.kategori).replace('badge', 'badge inline') +
+      `<div class="dmeta">ID BARU <b>${esc(row.idBaru != null ? row.idBaru : '—')}</b>` +
+      (row.idLama ? ` &middot; ID LAMA <b class="mono">${esc(row.idLama)}</b>` : '') +
+      ` &middot; UKE II <b>${esc(row.uke || '—')}</b> &middot; Tarif <b>${esc(tarifTxt)}</b></div>`;
+    body.innerHTML =
+      field('Output / Tipe Data', row.output) +
+      field('Dasar Hukum', row.hukum) +
+      field('Deskripsi Layanan', row.deskripsi) +
+      field('Pengguna Saat Ini', row.pengguna) +
+      field('Rata-rata Permintaan (3 tahun)', row.rata3) +
+      field('Pendapatan 3 Tahun', row.pendapatan) +
+      field('Benchmarking', row.bench);
+  } else {
+    const tarifTxt = (fmtTarif(classifyTarif(row.tarifLama)) || '—') + (row.satuanLama ? ' · ' + row.satuanLama : '');
+    $('#drawerTitle').textContent = 'Penjelasan HAPUS (PP 47/2018)';
+    $('#drawerSub').innerHTML = esc(row.namaLama) + katBadge('HAPUS').replace('badge', 'badge inline') +
+      `<div class="dmeta">ID LAMA <b class="mono">${esc(row.idLama)}</b> &middot; UKE II <b>${esc(row.ukeLama || '—')}</b> &middot; Tarif lama <b>${esc(tarifTxt)}</b></div>`;
+    body.innerHTML =
+      `<div class="warn">Data Penjelasan HAPUS diambil dari kolom P &amp; X sheet PP 47/2018 (gid 0) &mdash; tanpa data contoh.</div>` +
+      field('Kategori Penghapusan (kolom P)', row.alasan) +
+      field('Penjelasan (kolom X)', row.penjelasan);
+  }
+  $('#drawer').classList.add('open');
+  $('#scrim').classList.add('open');
+}
+function field(label, val, mono) {
+  const v = (val == null || String(val).trim() === '') ? '<span class="empty">—</span>' : esc(val);
+  return `<div class="field"><div class="flabel">${esc(label)}</div><div class="fval ${mono ? 'mono' : ''}">${v}</div></div>`;
+}
+function closeDrawer() {
+  $('#drawer').classList.remove('open');
+  $('#scrim').classList.remove('open');
+}
+
+function renderEmpty() {
+  const a = state.loaded.rpp ? state.loaded.rpp.attempts : [];
+  const rows = a.map((x) =>
+    `<li class="${x.status}">${x.status === 'ok' ? '&#10003;' : '&#10007;'} <b>${esc(x.label)}</b>` +
+    (x.status === 'ok' ? ` — ${x.rows} baris` : ` — ${esc(x.error || '')}`) + `</li>`).join('');
+  $('#tbody').innerHTML = `<tr><td colspan="6"><div class="emptystate">
+    <div class="es-title">Data tidak dapat dimuat</div>
+    <p>Tidak ada sumber yang berhasil. Ini <b>bukan</b> data contoh — tabel sengaja dibiarkan kosong
+    daripada menampilkan data dummy.</p>
+    <ul class="attempts">${rows || '<li>—</li>'}</ul>
+    <p class="hint">Perbaikan: buka sheet → <b>File &rsaquo; Share &rsaquo; Publish to web</b> →
+    pilih <i>Entire document</i> / <i>CSV</i>, lalu muat ulang. Endpoint <code>gviz</code> diblokir CORS,
+    sehingga aplikasi jatuh ke CSV publik yang sudah mengizinkan <code>Access-Control-Allow-Origin</code>.</p>
+    <div class="es-actions">
+      <a class="btn" href="${CONFIG.RPP_SHEET_URL}" target="_blank" rel="noopener">Buka sheet DATA_DUKUNG</a>
+      <a class="btn" href="${CONFIG.HAPUS_SHEET_URL}" target="_blank" rel="noopener">Buka sheet PP 47/2018</a>
+      <button class="btn primary" id="retryBtn">Muat ulang</button>
+    </div></div></td></tr>`;
+  const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', loadAll);
+  $('#count').textContent = '0 baris';
+}
+
+function renderStatus() {
+  const el = $('#loadStatus');
+  if (state.loading) { el.innerHTML = `<span class="dot loading"></span> Memuat…`; return; }
+  const r = state.loaded.rpp, h = state.loaded.hapus;
+  const rs = r && r.source ? `RPP: ${r.source.label}` : 'RPP: GAGAL';
+  const hs = h && h.source ? `HAPUS: ${h.source.label}` : 'HAPUS: GAGAL';
+  el.innerHTML = `<span class="dot ${r && r.source ? 'ok' : 'err'}"></span> ${esc(rs)} ` +
+    `<span class="dot ${h && h.source ? 'ok' : 'err'}"></span> ${esc(hs)}` +
+    (h && !h.source ? ` <button class="link" id="hapusWarn">detail</button>` : '');
+  const hw = $('#hapusWarn');
+  if (hw) hw.addEventListener('click', () => {
+    alert('Data Penjelasan HAPUS belum bisa di-load.\n\n' +
+      (h.attempts || []).map((x) => `${x.status === 'ok' ? 'OK ' : 'X  '}${x.label} — ${x.error || x.rows + ' baris'}`).join('\n'));
+  });
+}
+function renderFooter() {
+  const r = state.loaded.rpp, h = state.loaded.hapus;
+  $('#footerInfo').innerHTML =
+    `Sumber RPP: <b>${esc(r && r.source ? r.source.label : '—')}</b> · ` +
+    `Sumber HAPUS: <b>${esc(h && h.source ? h.source.label : '—')}</b> · ` +
+    `dimuat ${new Date().toLocaleString('id-ID')}`;
+}
+
+function wire() {
+  $('#search').addEventListener('input', (e) => { state.filters.q = e.target.value; renderTable(); });
+  $('#kategori').addEventListener('change', (e) => { state.filters.kategori = e.target.value; renderTable(); });
+
+  const toggle = $('#hapusToggle');
+  const sync = () => {
+    state.filters.showHapus = toggle.checked;
+    $('#hapusWrap').classList.toggle('on', toggle.checked);
+    renderTable();
+  };
+  toggle.addEventListener('change', sync);
+  sync();
+
+  const ukeBtn = $('#ukeBtn');
+  ukeBtn.addEventListener('click', (e) => { e.stopPropagation(); $('#ukeMenu').classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!$('#ukeWrap').contains(e.target)) $('#ukeMenu').classList.remove('open');
+  });
+  $('#ukeClear').addEventListener('click', () => {
+    state.filters.uke.clear();
+    $('#ukeMenu').querySelectorAll('input').forEach((i) => { i.checked = false; });
+    updateUkeLabel(); renderTable();
+  });
+
+  $('#reload').addEventListener('click', loadAll);
+  $('#scrim').addEventListener('click', closeDrawer);
+  $('#drawerClose').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+  $('#tbody').addEventListener('click', (e) => {
+    const btn = e.target.closest('button.act');
+    if (!btn) return;
+    const tr = btn.closest('tr');
+    const key = tr.getAttribute('data-key');
+    const item = state.visible.find((x) => keyOf(x.row) === key);
+    if (!item) return;
+    openDrawer(btn.dataset.act, item.row);
+  });
+}
+
+wire();
+renderStatus();
+loadAll();

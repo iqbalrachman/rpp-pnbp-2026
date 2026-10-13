@@ -1,482 +1,283 @@
-/* ============================================================================
- * app.js — UI + loading orchestration for RPP PNBP BMKG 2026
- * ==========================================================================*/
-import {
-  CONFIG, rppSources, hapusSources,
-  parseCSV, gvizToRows, normRpp, normPP47,
-  hierarchy, classifyTarif, fmtTarif, percentChange,
-  resolveUke, sortRows, computeStats,
-} from './data.js';
-
-/* ------------------------------- state ---------------------------------- */
-const state = {
-  rpp: [], hapus: [], oldMap: {},
-  visible: [],               // filtered + sorted rows currently rendered
-  ukeList: [],
-  loading: true,
-  loaded: { rpp: null, hapus: null },   // {source, error}
-  usingSnapshot: false, snapshotAt: null,
-  stats: null,
-  filters: { q: '', uke: new Set(), kategori: 'SEMUA', showHapus: false },
-};
-
-const $ = (sel) => document.querySelector(sel);
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;');
-
-/* ------------------------------ fetching -------------------------------- */
-async function fetchText(url, timeout = 15000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeout);
-  try {
-    const res = await fetch(url, { mode: 'cors', redirect: 'follow', signal: ctrl.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.text();
-  } finally { clearTimeout(t); }
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPP PNBP BMKG 2026 — Analisis Lampiran (PP 47/2018 vs RPP 2026)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --slate-900:#0f172a; --slate-700:#334155; --slate-500:#64748b; --slate-400:#94a3b8;
+  --slate-300:#cbd5e1; --slate-200:#e2e8f0; --slate-100:#f1f5f9; --slate-50:#f8fafc;
+  --green:#16a34a; --amber:#d97706; --blue:#2563eb; --red:#dc2626;
+  --green-bg:#dcfce7; --amber-bg:#fef3c7; --blue-bg:#dbeafe; --red-bg:#fee2e2;
 }
-
-// Load a gviz JSON feed through a <script> tag (immune to the CORS block that
-// plain fetch() hits on the /gviz/tq endpoint).
-function loadJsonp(url, timeout = 12000) {
-  return new Promise((resolve, reject) => {
-    const cb = '__gvizCb_' + Math.random().toString(36).slice(2);
-    const script = document.createElement('script');
-    let settled = false;
-    const cleanup = () => {
-      clearTimeout(timer);
-      try { delete window[cb]; } catch (e) { window[cb] = undefined; }
-      if (script.parentNode) script.parentNode.removeChild(script);
-    };
-    const timer = setTimeout(() => { if (!settled) { settled = true; cleanup(); reject(new Error('timeout')); } }, timeout);
-    window[cb] = (data) => { if (settled) return; settled = true; cleanup(); resolve(data); };
-    script.onerror = () => { if (!settled) { settled = true; cleanup(); reject(new Error('script load error')); } };
-    script.src = url.replace('out:json', 'out:json;responseHandler:' + cb);
-    document.head.appendChild(script);
-  });
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  color:var(--slate-900); background:#fff; font-size:13px; -webkit-font-smoothing:antialiased;
 }
+code,.mono{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
 
-function jsonFromGvizText(text) {
-  const a = text.indexOf('{'), b = text.lastIndexOf('}');
-  if (a < 0 || b < 0) throw new Error('bentuk respons tidak dikenal');
-  return JSON.parse(text.slice(a, b + 1));
+.hero{
+  position:sticky; top:0; z-index:40; min-height:56px;
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  padding:8px 20px; background:rgba(255,255,255,.82);
+  backdrop-filter:saturate(180%) blur(14px); -webkit-backdrop-filter:saturate(180%) blur(14px);
+  border-bottom:1px solid var(--slate-200); position:sticky;
 }
-
-/* Try every candidate until one yields usable RPP rows. Never fabricates. */
-async function loadRpp() {
-  const attempts = [];
-  for (const src of rppSources()) {
-    try {
-      let rows;
-      if (src.kind === 'jsonp') {
-        const json = await loadJsonp(src.url);
-        rows = gvizToRows(json);
-      } else {
-        const text = await fetchText(src.url);
-        rows = src.format === 'json' ? gvizToRows(jsonFromGvizText(text)) : parseCSV(text);
-      }
-      const rpp = normRpp(rows);
-      if (!rpp.length) throw new Error('0 baris valid');
-      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: rpp.length });
-      return { rpp, source: src, attempts };
-    } catch (e) {
-      attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
-    }
-  }
-  return { rpp: [], source: null, attempts };
+.hero h1{font-size:15px; font-weight:700; margin:0; letter-spacing:-.01em; white-space:nowrap}
+.hero h1 small{display:block; font-weight:500; font-size:11px; color:var(--slate-500); letter-spacing:0}
+.pills{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center}
+.pill{
+  display:inline-flex; align-items:baseline; gap:5px; padding:4px 9px; border-radius:999px;
+  background:var(--slate-100); color:var(--slate-500); font-size:10.5px; font-weight:600;
+  letter-spacing:.02em; white-space:nowrap;
 }
+.pill b{font-size:13px; color:var(--slate-900); font-weight:700}
+.pill-total{background:var(--slate-900)} .pill-total b,.pill-total{color:#fff}
+.pill-green{background:var(--green-bg)} .pill-green b{color:var(--green)}
+.pill-amber{background:var(--amber-bg)} .pill-amber b{color:var(--amber)}
+.pill-blue{background:var(--blue-bg)} .pill-blue b{color:var(--blue)}
+.pill-red{background:var(--red-bg)} .pill-red b{color:var(--red)}
+#progress{position:absolute; left:0; right:0; bottom:0; height:2px; display:flex; overflow:hidden}
+.seg{height:100%}
+.seg-green{background:var(--green)} .seg-amber{background:var(--amber)}
+.seg-blue{background:var(--blue)} .seg-red{background:var(--red)}
 
-/* HAPUS detail: loop gid 0..10, first published tab that has real id rows wins. */
-async function loadHapus() {
-  const attempts = [];
-  for (const src of hapusSources()) {
-    try {
-      const text = await fetchText(src.url);
-      const { oldMap, hapusList } = normPP47(parseCSV(text));
-      if (!hapusList.length) throw new Error('tidak ada kolom HAPUS / ID_LAMA');
-      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: hapusList.length });
-      return { oldMap, hapusList, source: src, attempts };
-    } catch (e) {
-      attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
-    }
-  }
-  return { oldMap: {}, hapusList: [], source: null, attempts };
+.toolbar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 20px; border-bottom:1px solid var(--slate-100); background:#fff;
+  position:sticky; top:56px; z-index:20;
 }
-
-async function loadAll() {
-  state.loading = true;
-  renderStatus();
-  let [r, h] = await Promise.all([loadRpp(), loadHapus()]);
-
-  // Last resort: same-origin snapshot of REAL data (never demo rows).
-  // Guarantees the table renders even if every remote source is blocked
-  // (CORS, iframe sandbox, offline). Clearly labelled as a snapshot.
-  let snap = null;
-  if (!r.rpp.length || !h.hapusList.length) {
-    try { snap = await fetch('./snapshot.json', { cache: 'no-store' }).then((x) => {
-      if (!x.ok) throw new Error('HTTP ' + x.status); return x.json();
-    }); } catch (e) { snap = null; }
-  }
-  if (snap) {
-    if (!r.rpp.length && Array.isArray(snap.rpp) && snap.rpp.length) {
-      r = { rpp: snap.rpp, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
-            attempts: [...r.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.rpp.length }] };
-      state.usingSnapshot = true;
-    }
-    if (!h.hapusList.length && Array.isArray(snap.hapus) && snap.hapus.length) {
-      h = { oldMap: snap.oldMap || {}, hapusList: snap.hapus, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
-            attempts: [...h.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.hapus.length }] };
-      state.usingSnapshot = true;
-    }
-    state.snapshotAt = snap.capturedAt || null;
-  }
-
-  state.rpp = r.rpp;
-  state.hapus = h.hapusList;
-  state.oldMap = h.oldMap;
-  state.loaded = {
-    rpp: { source: r.source, attempts: r.attempts },
-    hapus: { source: h.source, attempts: h.attempts },
-  };
-  state.ukeList = [...new Set(
-    [...state.rpp.map((x) => x.uke), ...state.hapus.map((x) => x.ukeLama)]
-      .map((v) => (v || '').trim()).filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b));
-  state.stats = computeStats(state.rpp, state.hapus, Object.keys(state.oldMap));
-  state.loading = false;
-  buildUkeFilter();
-  renderHero();
-  renderTable();
-  renderFooter();
-  renderStatus();
-  renderNotice();
+.search{position:relative; flex:1 1 260px; min-width:200px}
+.search input{
+  width:100%; padding:7px 11px 7px 30px; border:1px solid var(--slate-200); border-radius:8px;
+  font:inherit; font-size:12.5px; outline:none; background:var(--slate-50);
 }
-
-function renderNotice() {
-  const el = $('#notice'); if (!el) return;
-  if (!state.usingSnapshot) { el.hidden = true; el.innerHTML = ''; return; }
-  const when = state.snapshotAt ? new Date(state.snapshotAt).toLocaleString('id-ID') : '—';
-  el.hidden = false;
-  el.innerHTML = '&#9888;&#65039; Sumber langsung tidak dapat dijangkau, sehingga tabel memuat ' +
-    '<b>snapshot data asli</b> (diambil ' + esc(when) + '). Tekan <b>Muat ulang</b> untuk mencoba live lagi.';
+.search input:focus{border-color:var(--blue); background:#fff; box-shadow:0 0 0 3px var(--blue-bg)}
+.search svg{position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--slate-400)}
+select.ctl{
+  padding:7px 10px; border:1px solid var(--slate-200); border-radius:8px; background:var(--slate-50);
+  font:inherit; font-size:12.5px; outline:none; cursor:pointer;
 }
-
-/* ------------------------------- helpers -------------------------------- */
-function iconFor(row) {
-  const text = [row.jenis, row.subjenis, row.nama, row.detil, row.namaLama, row.pathLama && row.pathLama.join(' ')]
-    .filter(Boolean).join(' ').toLowerCase();
-  if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '\u2708\ufe0f';
-  if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '\ud83c\udf0a';
-  if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '\ud83c\udf0b';
-  if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '\ud83c\udf21\ufe0f';
-  return '\ud83c\udf24\ufe0f';
+.wrap{position:relative}
+.btn-uke{
+  padding:7px 11px; border:1px solid var(--slate-200); border-radius:8px; background:var(--slate-50);
+  font:inherit; font-size:12.5px; cursor:pointer; color:var(--slate-700); white-space:nowrap;
 }
-
-function katBadge(kat) {
-  const map = {
-    BARU: 'badge-green', UBAH: 'badge-amber', TETAP: 'badge-blue', HAPUS: 'badge-red',
-  };
-  return `<span class="badge ${map[kat] || ''}">${esc(kat)}</span>`;
+.btn-uke:hover{border-color:var(--slate-300)}
+.menu{
+  display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:60; min-width:190px;
+  max-height:320px; overflow:auto; background:#fff; border:1px solid var(--slate-200);
+  border-radius:10px; box-shadow:0 12px 34px rgba(15,23,42,.14); padding:6px;
 }
+.menu.open{display:block}
+.chk{display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:7px; cursor:pointer; font-size:12.5px}
+.chk:hover{background:var(--slate-50)}
+.menu-head{display:flex; justify-content:space-between; align-items:center; padding:4px 8px 6px; border-bottom:1px solid var(--slate-100); margin-bottom:4px}
+.menu-head span{font-size:10.5px; color:var(--slate-400); font-weight:600; letter-spacing:.04em}
+.menu-head button{border:0; background:none; color:var(--blue); font:inherit; font-size:11px; cursor:pointer; padding:2px 4px}
 
-/* ------------------------------- filtering ------------------------------ */
-function currentRows() {
-  const f = state.filters;
-  const q = f.q.trim().toLowerCase();
-  let base = state.filters.showHapus ? [...state.rpp, ...state.hapus] : state.rpp.slice();
-  const ukeResolved = resolveUke(base);
-
-  const out = [];
-  base.forEach((row, i) => {
-    const info = ukeResolved[i];
-    if (f.uke.size && !f.uke.has(info.uke)) return;
-    if (f.kategori !== 'SEMUA') {
-      if (row.type === 'hapus' || row.kategori !== f.kategori) return;
-    }
-    if (q) {
-      const hay = [
-        row.jenis, row.subjenis, row.nama, row.detil,
-        row.namaLama, (row.pathLama || []).join(' '),
-        row.idBaru != null ? String(row.idBaru) : '', row.idLama, row.tarif, row.uke,
-      ].join(' ').toLowerCase();
-      if (!hay.includes(q)) return;
-    }
-    out.push({ row, uke: info.uke, inherited: info.inherited });
-  });
-  return { items: out, raw: base, ukeResolved };
+.toggle-wrap{display:inline-flex; align-items:center; gap:8px; padding:5px 11px; border-radius:999px; border:1px solid var(--slate-200); background:var(--slate-50); cursor:pointer; user-select:none}
+.toggle-wrap .lbl{font-size:12px; font-weight:600; color:var(--slate-500)}
+.toggle-wrap.on{border-color:var(--red); background:var(--red-bg)}
+.toggle-wrap.on .lbl{color:var(--red)}
+.switch{position:relative; width:34px; height:18px; border-radius:999px; background:var(--slate-300); transition:.18s}
+.switch::after{content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:.18s; box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle-wrap.on .switch{background:var(--red)}
+.toggle-wrap.on .switch::after{left:18px}
+.toggle-wrap input{position:absolute; opacity:0; pointer-events:none}
+.btn{
+  padding:7px 12px; border:1px solid var(--slate-200); border-radius:8px; background:#fff;
+  font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; color:var(--slate-700); text-decoration:none; display:inline-flex; align-items:center; gap:6px;
 }
+.btn:hover{background:var(--slate-50)}
+.btn.primary{background:var(--slate-900); border-color:var(--slate-900); color:#fff}
+.btn.primary:hover{background:#1e293b}
 
-/* -------------------------------- render -------------------------------- */
-function renderHero() {
-  const s = state.stats || { semula: 0, rpp: 0, baru: 0, ubah: 0, tetap: 0, hapus: 0, pct: {} };
-  const sum = (s.baru + s.ubah + s.tetap + s.hapus) || 1;
-  const seg = (n, cls) => `<span class="seg ${cls}" style="width:${(n / sum) * 100}%"></span>`;
-  $('#pills').innerHTML = `
-    <span class="pill pill-total"><b>${s.semula}</b> SEMULA</span>
-    <span class="pill"><b>${s.rpp}</b> RPP</span>
-    <span class="pill pill-green"><b>${s.baru}</b> BARU</span>
-    <span class="pill pill-amber"><b>${s.ubah}</b> UBAH</span>
-    <span class="pill pill-blue"><b>${s.tetap}</b> TETAP</span>
-    <span class="pill pill-red"><b>${s.hapus}</b> HAPUS</span>`;
-  $('#progress').innerHTML =
-    seg(s.baru, 'seg-green') + seg(s.ubah, 'seg-amber') + seg(s.tetap, 'seg-blue') + seg(s.hapus, 'seg-red');
+.notice{margin:0 20px 12px; padding:10px 14px; border-radius:10px; background:var(--amber-bg); color:#92400e;
+  font-size:12px; border-left:3px solid var(--amber)}
+
+.tablewrap{padding:0 20px 40px}
+table{width:100%; border-collapse:collapse; table-layout:fixed}
+thead th{
+  position:sticky; top:107px; z-index:10; background:rgba(255,255,255,.94); backdrop-filter:blur(8px);
+  text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.05em; color:var(--slate-400);
+  text-transform:uppercase; padding:10px 10px; border-bottom:1px solid var(--slate-200);
 }
+th.c-id{width:172px} th.c-uke{width:98px} th.c-kat{width:88px} th.c-tarif{width:210px} th.c-act{width:64px; text-align:center}
+tbody tr{height:40px; border-bottom:1px solid var(--slate-100)}
+tbody tr:hover{background:var(--slate-50)}
+tbody td{padding:6px 10px; vertical-align:middle}
+.center{text-align:center} .muted{color:var(--slate-400); padding:40px 0}
 
-function buildUkeFilter() {
-  const box = $('#ukeMenuItems');
-  box.innerHTML = state.ukeList.map((u) =>
-    `<label class="chk"><input type="checkbox" value="${esc(u)}" ${state.filters.uke.has(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`
-  ).join('');
-  box.querySelectorAll('input').forEach((inp) => {
-    inp.addEventListener('change', () => {
-      if (inp.checked) state.filters.uke.add(inp.value); else state.filters.uke.delete(inp.value);
-      updateUkeLabel(); renderTable();
-    });
-  });
-  updateUkeLabel();
+.td-id{font-variant-numeric:tabular-nums}
+.idcol{line-height:1.15}
+.idbaru{font-size:12px; font-weight:700; color:var(--slate-900)}
+.idlama{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--slate-400); white-space:nowrap}
+.id-hapus{font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--red); text-decoration:line-through}
+
+.td-hier{overflow:hidden}
+.hier{display:flex; flex-wrap:wrap; align-items:baseline; gap:2px; line-height:1.28}
+.icon{font-size:12px; margin-right:3px; flex:none}
+.parents{font-size:11px; color:var(--slate-400); font-weight:400}
+.parents i{color:var(--slate-300); font-style:normal; margin:0 3px}
+.leaf{font-size:13px; font-weight:700; color:#000}
+.leaf-hapus{text-decoration:line-through; color:var(--slate-500)}
+
+.ukepill{
+  display:inline-block; padding:3px 9px; border-radius:10px; font-size:10px; font-weight:600;
+  background:var(--slate-900); color:#fff; letter-spacing:.03em; white-space:nowrap;
 }
-function updateUkeLabel() {
-  const n = state.filters.uke.size;
-  $('#ukeBtn').textContent = n ? `UKE II (${n})` : 'UKE II (semua)';
+.uke-inherited{background:var(--slate-300); color:var(--slate-700); font-style:italic; opacity:.6}
+.uke-empty{color:var(--slate-300)}
+
+.badge{display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:.03em}
+.badge.inline{margin-left:8px}
+.badge-green{background:var(--green-bg); color:var(--green)}
+.badge-amber{background:var(--amber-bg); color:var(--amber)}
+.badge-blue{background:var(--blue-bg); color:var(--blue)}
+.badge-red{background:var(--red-bg); color:var(--red)}
+
+.tarif{display:flex; flex-wrap:wrap; align-items:center; gap:6px; line-height:1.2}
+.tarif .satuan{flex-basis:100%; font-size:10px; color:var(--slate-400); font-weight:400}
+.t-green{color:var(--green)} .t-amber{color:var(--amber)} .t-blue{color:var(--blue)} .t-red{color:var(--red)}
+.t-old{color:var(--slate-300); font-weight:600}
+.arrow{color:var(--slate-300)}
+.chip{display:inline-block; padding:1px 6px; border-radius:5px; font-size:9.5px; font-weight:600; background:var(--slate-100); color:var(--slate-500)}
+.chip-up{background:var(--red-bg); color:var(--red)}
+.chip-down{background:var(--green-bg); color:var(--green)}
+
+.td-act{text-align:center}
+.act{
+  width:30px; height:30px; border:1px solid var(--slate-200); border-radius:8px; background:#fff;
+  color:var(--slate-500); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
 }
+.act:hover{border-color:var(--slate-300); color:var(--slate-900); background:var(--slate-50)}
+.act-hapus:hover{color:var(--red); border-color:var(--red)}
 
-function tarifCell(row) {
-  if (row.type === 'hapus') {
-    const t = classifyTarif(row.tarifLama);
-    return `<div class="tarif"><s class="t-red">${esc(fmtTarif(t) || '—')}</s>` +
-      (row.satuanLama ? `<span class="satuan">${esc(row.satuanLama)}</span>` : '') + `</div>`;
-  }
-  const nt = classifyTarif(row.tarif);
-  const newTxt = fmtTarif(nt) || '—';
-  if (row.kategori === 'BARU') {
-    return `<div class="tarif"><span class="t-old">—</span><span class="arrow">&rarr;</span>` +
-      `<b class="t-green">${esc(newTxt)}</b>` +
-      (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
-  }
-  if (row.kategori === 'UBAH') {
-    const oldRec = state.oldMap[row.idLama];
-    const oldT = oldRec ? classifyTarif(oldRec.tarifLama) : null;
-    const pc = oldT ? percentChange(oldT, nt) : null;
-    let badge = '';
-    if (pc != null) {
-      const up = pc > 0;
-      badge = `<span class="chip ${up ? 'chip-up' : (pc < 0 ? 'chip-down' : 'chip-flat')}">${up ? '+' : ''}${pc}%</span>`;
-    } else if (oldT && oldT.raw) {
-      badge = `<span class="chip chip-flat">dari ${esc(fmtTarif(oldT))}</span>`;
-    }
-    return `<div class="tarif"><b class="t-amber">${esc(newTxt)}</b>${badge}` +
-      (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
-  }
-  // TETAP
-  return `<div class="tarif"><b class="t-blue">${esc(newTxt)}</b>` +
-    `<span class="chip chip-flat">0%</span>` +
-    (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
+.row-hapus{background:#fef2f2}
+.row-hapus:hover{background:#fee2e2}
+.row-hapus td:first-child{box-shadow:inset 4px 0 0 var(--red)}
+
+.scrim{position:fixed; inset:0; background:rgba(15,23,42,.32); opacity:0; pointer-events:none; transition:.2s; z-index:80}
+.scrim.open{opacity:1; pointer-events:auto}
+.drawer{
+  position:fixed; top:0; right:0; height:100%; width:480px; max-width:92vw; background:#fff; z-index:90;
+  transform:translateX(100%); transition:transform .22s ease; box-shadow:-16px 0 40px rgba(15,23,42,.14);
+  display:flex; flex-direction:column;
 }
+.drawer.open{transform:none}
+.drawer header{display:flex; align-items:flex-start; gap:12px; padding:16px 18px; border-bottom:1px solid var(--slate-100)}
+.drawer h2{margin:0; font-size:14px; font-weight:700}
+.drawer .sub{font-size:12px; color:var(--slate-500); margin-top:4px}
+.dmeta{margin-top:7px; font-size:11px; color:var(--slate-400)}
+.dmeta b{color:var(--slate-700); font-weight:600}
+.drawer .close{margin-left:auto; border:0; background:var(--slate-100); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:16px; color:var(--slate-500)}
+.drawer .close:hover{background:var(--slate-200)}
+.drawer .body{padding:16px 18px 40px; overflow:auto}
+.field{padding:10px 0; border-bottom:1px dashed var(--slate-100)}
+.flabel{font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--slate-400); margin-bottom:5px}
+.fval{font-size:12.5px; color:var(--slate-700); white-space:pre-wrap; word-break:break-word; line-height:1.5}
+.fval.mono{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--slate-900)}
+.fval .empty{color:var(--slate-300)}
+.warn{background:var(--amber-bg); color:#92400e; padding:10px 12px; border-radius:8px; font-size:11.5px; margin-bottom:12px}
 
-function idCell(row) {
-  if (row.type === 'hapus') {
-    return `<div class="idcol"><div class="idbaru id-hapus">${esc(row.idLama)}</div></div>`;
-  }
-  const bar = row.idBaru != null ? `<div class="idbaru">ID: ${esc(row.idBaru)}</div>` : '';
-  const lama = row.idLama ? `<div class="idlama">&#9492;&#9472; ${esc(row.idLama)}</div>` : '';
-  return `<div class="idcol">${bar}${lama}</div>`;
-}
+.emptystate{max-width:760px; margin:40px auto; padding:24px; border:1px solid var(--slate-200); border-radius:14px; text-align:left}
+.es-title{font-size:16px; font-weight:700; color:var(--red); margin-bottom:8px}
+.emptystate p{color:var(--slate-500); line-height:1.6}
+.attempts{list-style:none; padding:0; margin:14px 0}
+.attempts li{padding:7px 10px; border-radius:8px; background:var(--slate-50); margin-bottom:5px; font-size:12px; font-family:'JetBrains Mono',monospace}
+.attempts li.ok{color:var(--green)} .attempts li.fail{color:var(--red)}
+.hint{font-size:12px; background:var(--slate-50); padding:12px 14px; border-radius:10px; border-left:3px solid var(--blue)}
+.es-actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:16px}
 
-function hierCell(row) {
-  const icon = `<span class="icon">${iconFor(row)}</span>`;
-  if (row.type === 'hapus') {
-    const path = (row.pathLama || []).join(' &rsaquo; ');
-    return `<div class="hier">${icon}<span class="parents">${esc(path)}</span>` +
-      `<span class="leaf leaf-hapus">${esc(row.namaLama)}</span></div>`;
-  }
-  const h = hierarchy(row);
-  const parents = h.parents.map((p) => esc(p)).join(' <i>&rsaquo;</i> ');
-  return `<div class="hier">${icon}` +
-    (parents ? `<span class="parents">${parents} <i>&rsaquo;</i> </span>` : '') +
-    `<span class="leaf">${esc(h.leaf)}</span></div>`;
-}
+.statusbar{display:flex; gap:16px; align-items:center; padding:8px 20px; border-top:1px solid var(--slate-100); font-size:11px; color:var(--slate-500); flex-wrap:wrap}
+.dot{width:7px; height:7px; border-radius:50%; display:inline-block; background:var(--slate-300); margin-right:5px}
+.dot.ok{background:var(--green)} .dot.err{background:var(--red)}
+.dot.loading{background:var(--amber); animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.link{border:0; background:none; color:var(--blue); font:inherit; cursor:pointer; text-decoration:underline; padding:0}
+#count{color:var(--slate-400)}
+@media (max-width:720px){ .pills{width:100%; margin-left:0} thead th{top:auto} .tablewrap{padding:0 8px 40px} .hero,.toolbar{padding-left:10px; padding-right:10px} }
+</style>
+</head>
+<body>
+<header class="hero">
+  <h1>RPP PNBP BMKG 2026 <small>Lampiran PP 47/2018 (184 layanan) dibandingkan RPP 2026 (154 layanan)</small></h1>
+  <div class="pills" id="pills"></div>
+  <div id="progress"></div>
+</header>
 
-function rowHtml(item) {
-  const { row, uke, inherited } = item;
-  const isHapus = row.type === 'hapus';
-  const cls = isHapus ? 'row row-hapus' : 'row';
-  const ukePill = uke
-    ? `<span class="ukepill ${inherited ? 'uke-inherited' : ''}" title="${inherited ? 'Inherited from above' : 'UKE II: ' + esc(uke)}">${esc(uke)}</span>`
-    : `<span class="uke-empty">—</span>`;
-  const kat = isHapus ? katBadge('HAPUS') : katBadge(row.kategori);
-  const act = isHapus
-    ? `<button class="act act-hapus" data-act="hapus" title="Penjelasan HAPUS (PP 47/2018)">${ICON_FILE}</button>`
-    : `<button class="act" data-act="rpp" title="Detail 7 field">${ICON_EYE}</button>`;
-  return `<tr class="${cls}" data-key="${esc(keyOf(row))}">` +
-    `<td class="td-id">${idCell(row)}</td>` +
-    `<td class="td-hier">${hierCell(row)}</td>` +
-    `<td class="td-uke">${ukePill}</td>` +
-    `<td class="td-kat">${kat}</td>` +
-    `<td class="td-tarif">${tarifCell(row)}</td>` +
-    `<td class="td-act">${act}</td></tr>`;
-}
+<div class="toolbar">
+  <label class="search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input id="search" type="search" placeholder="Cari 4 kolom hirarki: jenis, subjenis, layanan, detil…" autocomplete="off">
+  </label>
+  <div class="wrap" id="ukeWrap">
+    <button class="btn-uke" id="ukeBtn">UKE II (semua)</button>
+    <div class="menu" id="ukeMenu">
+      <div class="menu-head"><span>UKE II</span><button id="ukeClear" type="button">Bersihkan</button></div>
+      <div id="ukeMenuItems"></div>
+    </div>
+  </div>
+  <select class="ctl" id="kategori">
+    <option value="SEMUA">Semua kategori</option>
+    <option value="BARU">BARU</option>
+    <option value="UBAH">UBAH</option>
+    <option value="TETAP">TETAP</option>
+  </select>
+  <label class="toggle-wrap" id="hapusWrap">
+    <span class="lbl">DIHAPUS</span>
+    <span class="switch"></span>
+    <input id="hapusToggle" type="checkbox">
+  </label>
+  <button class="btn" id="reload" title="Muat ulang data">&#8635; Muat ulang</button>
+</div>
 
-const ICON_EYE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-const ICON_FILE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+<div id="notice" class="notice" hidden></div>
 
-function keyOf(row) {
-  return row.type === 'hapus' ? 'H:' + row.idLama : 'R:' + (row.idBaru != null ? row.idBaru : row.idLama);
-}
+<div class="tablewrap">
+  <table>
+    <colgroup>
+      <col style="width:172px"><col><col style="width:98px"><col style="width:88px"><col style="width:210px"><col style="width:64px">
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="c-id">ID</th>
+        <th>Layanan (hierarki bottom&#8209;up)</th>
+        <th class="c-uke">UKE II</th>
+        <th class="c-kat">Kategori</th>
+        <th class="c-tarif">Tarif</th>
+        <th class="c-act">Aksi</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
 
-function renderTable() {
-  const { items } = currentRows();
-  // sort respecting current toggle
-  const sorted = sortRows(items.map((x) => x.row), state.filters.showHapus);
-  const byKey = new Map(items.map((x) => [keyOf(x.row), x]));
-  state.visible = sorted.map((r) => byKey.get(keyOf(r))).filter(Boolean);
+<div class="statusbar">
+  <span id="loadStatus"></span>
+  <span id="count"></span>
+  <span id="footerInfo" style="margin-left:auto"></span>
+</div>
 
-  const tbody = $('#tbody');
-  if (state.loading) {
-    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Memuat data…</td></tr>`;
-    return;
-  }
-  if (!state.rpp.length) { renderEmpty(); return; }
-  if (!state.visible.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Tidak ada baris yang cocok dengan filter.</td></tr>`;
-    $('#count').textContent = '0 baris';
-    return;
-  }
-  tbody.innerHTML = state.visible.map(rowHtml).join('');
-  $('#count').textContent = `${state.visible.length} baris`;
-}
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <header>
+    <div>
+      <h2 id="drawerTitle">Detail</h2>
+      <div class="sub" id="drawerSub"></div>
+    </div>
+    <button class="close" id="drawerClose" aria-label="Tutup">&times;</button>
+  </header>
+  <div class="body" id="drawerBody"></div>
+</aside>
 
-/* ------------------------------- drawer --------------------------------- */
-function openDrawer(kind, row) {
-  const body = $('#drawerBody');
-  if (kind === 'rpp') {
-    const h = hierarchy(row);
-    const tarifTxt = (fmtTarif(classifyTarif(row.tarif)) || '—') + (row.satuan ? ' \u00b7 ' + row.satuan : '');
-    $('#drawerTitle').textContent = 'Detail Layanan RPP';
-    $('#drawerSub').innerHTML = esc(h.leaf) + katBadge(row.kategori).replace('badge', 'badge inline') +
-      `<div class="dmeta">ID BARU <b>${esc(row.idBaru != null ? row.idBaru : '—')}</b>` +
-      (row.idLama ? ` &middot; ID LAMA <b class="mono">${esc(row.idLama)}</b>` : '') +
-      ` &middot; UKE II <b>${esc(row.uke || '—')}</b> &middot; Tarif <b>${esc(tarifTxt)}</b></div>`;
-    // exactly the 7 DATA_DUKUNG fields requested
-    body.innerHTML =
-      field('Output / Tipe Data', row.output) +
-      field('Dasar Hukum', row.hukum) +
-      field('Deskripsi Layanan', row.deskripsi) +
-      field('Pengguna Saat Ini', row.pengguna) +
-      field('Rata-rata Permintaan (3 tahun)', row.rata3) +
-      field('Pendapatan 3 Tahun', row.pendapatan) +
-      field('Benchmarking', row.bench);
-  } else {
-    const tarifTxt = (fmtTarif(classifyTarif(row.tarifLama)) || '—') + (row.satuanLama ? ' \u00b7 ' + row.satuanLama : '');
-    $('#drawerTitle').textContent = 'Penjelasan HAPUS (PP 47/2018)';
-    $('#drawerSub').innerHTML = esc(row.namaLama) + katBadge('HAPUS').replace('badge', 'badge inline') +
-      `<div class="dmeta">ID LAMA <b class="mono">${esc(row.idLama)}</b> &middot; UKE II <b>${esc(row.ukeLama || '—')}</b> &middot; Tarif lama <b>${esc(tarifTxt)}</b></div>`;
-    // exactly the 2 fields requested: kolom P (alasan) & X (penjelasan)
-    body.innerHTML =
-      `<div class="warn">Data Penjelasan HAPUS diambil dari kolom P &amp; X sheet PP 47/2018 (gid 0) &mdash; tanpa data contoh.</div>` +
-      field('Kategori Penghapusan (kolom P)', row.alasan) +
-      field('Penjelasan (kolom X)', row.penjelasan);
-  }
-  $('#drawer').classList.add('open');
-  $('#scrim').classList.add('open');
-}
-function field(label, val, mono) {
-  const v = (val == null || String(val).trim() === '') ? '<span class="empty">—</span>' : esc(val);
-  return `<div class="field"><div class="flabel">${esc(label)}</div><div class="fval ${mono ? 'mono' : ''}">${v}</div></div>`;
-}
-function closeDrawer() {
-  $('#drawer').classList.remove('open');
-  $('#scrim').classList.remove('open');
-}
-
-/* ------------------------------ empty state ----------------------------- */
-function renderEmpty() {
-  const a = state.loaded.rpp ? state.loaded.rpp.attempts : [];
-  const rows = a.map((x) =>
-    `<li class="${x.status}">${x.status === 'ok' ? '&#10003;' : '&#10007;'} <b>${esc(x.label)}</b>` +
-    (x.status === 'ok' ? ` — ${x.rows} baris` : ` — ${esc(x.error || '')}`) + `</li>`).join('');
-  $('#tbody').innerHTML = `<tr><td colspan="6"><div class="emptystate">
-    <div class="es-title">Data tidak dapat dimuat</div>
-    <p>Tidak ada sumber yang berhasil. Ini <b>bukan</b> data contoh — tabel sengaja dibiarkan kosong
-    daripada menampilkan data dummy.</p>
-    <ul class="attempts">${rows || '<li>—</li>'}</ul>
-    <p class="hint">Perbaikan: buka sheet → <b>File &rsaquo; Share &rsaquo; Publish to web</b> →
-    pilih <i>Entire document</i> / <i>CSV</i>, lalu muat ulang. Endpoint <code>gviz</code> diblokir CORS,
-    sehingga aplikasi jatuh ke CSV publik yang sudah mengizinkan <code>Access-Control-Allow-Origin</code>.</p>
-    <div class="es-actions">
-      <a class="btn" href="${CONFIG.RPP_SHEET_URL}" target="_blank" rel="noopener">Buka sheet DATA_DUKUNG</a>
-      <a class="btn" href="${CONFIG.HAPUS_SHEET_URL}" target="_blank" rel="noopener">Buka sheet PP 47/2018</a>
-      <button class="btn primary" id="retryBtn">Muat ulang</button>
-    </div></div></td></tr>`;
-  const rb = $('#retryBtn'); if (rb) rb.addEventListener('click', loadAll);
-  $('#count').textContent = '0 baris';
-}
-
-/* ------------------------------- status/footer -------------------------- */
-function renderStatus() {
-  const el = $('#loadStatus');
-  if (state.loading) { el.innerHTML = `<span class="dot loading"></span> Memuat…`; return; }
-  const r = state.loaded.rpp, h = state.loaded.hapus;
-  const rs = r && r.source ? `RPP: ${r.source.label}` : 'RPP: GAGAL';
-  const hs = h && h.source ? `HAPUS: ${h.source.label}` : 'HAPUS: GAGAL';
-  el.innerHTML = `<span class="dot ${r && r.source ? 'ok' : 'err'}"></span> ${esc(rs)} ` +
-    `<span class="dot ${h && h.source ? 'ok' : 'err'}"></span> ${esc(hs)}` +
-    (h && !h.source ? ` <button class="link" id="hapusWarn">detail</button>` : '');
-  const hw = $('#hapusWarn');
-  if (hw) hw.addEventListener('click', () => {
-    alert('Data Penjelasan HAPUS belum bisa di-load.\n\n' +
-      (h.attempts || []).map((x) => `${x.status === 'ok' ? 'OK ' : 'X  '}${x.label} — ${x.error || x.rows + ' baris'}`).join('\n'));
-  });
-}
-function renderFooter() {
-  const r = state.loaded.rpp, h = state.loaded.hapus;
-  $('#footerInfo').innerHTML =
-    `Sumber RPP: <b>${esc(r && r.source ? r.source.label : '—')}</b> · ` +
-    `Sumber HAPUS: <b>${esc(h && h.source ? h.source.label : '—')}</b> · ` +
-    `dimuat ${new Date().toLocaleString('id-ID')}`;
-}
-
-/* -------------------------------- events -------------------------------- */
-function wire() {
-  $('#search').addEventListener('input', (e) => { state.filters.q = e.target.value; renderTable(); });
-  $('#kategori').addEventListener('change', (e) => { state.filters.kategori = e.target.value; renderTable(); });
-
-  const toggle = $('#hapusToggle');
-  const sync = () => {
-    state.filters.showHapus = toggle.checked;
-    $('#hapusWrap').classList.toggle('on', toggle.checked);
-    renderTable();
-  };
-  toggle.addEventListener('change', sync);
-  sync();
-
-  const ukeBtn = $('#ukeBtn');
-  ukeBtn.addEventListener('click', (e) => { e.stopPropagation(); $('#ukeMenu').classList.toggle('open'); });
-  document.addEventListener('click', (e) => {
-    if (!$('#ukeWrap').contains(e.target)) $('#ukeMenu').classList.remove('open');
-  });
-  $('#ukeClear').addEventListener('click', () => {
-    state.filters.uke.clear();
-    $('#ukeMenu').querySelectorAll('input').forEach((i) => { i.checked = false; });
-    updateUkeLabel(); renderTable();
-  });
-
-  $('#reload').addEventListener('click', loadAll);
-  $('#scrim').addEventListener('click', closeDrawer);
-  $('#drawerClose').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-
-  $('#tbody').addEventListener('click', (e) => {
-    const btn = e.target.closest('button.act');
-    if (!btn) return;
-    const tr = btn.closest('tr');
-    const key = tr.getAttribute('data-key');
-    const item = state.visible.find((x) => keyOf(x.row) === key);
-    if (!item) return;
-    openDrawer(btn.dataset.act, item.row);
-  });
-}
-
-/* --------------------------------- boot --------------------------------- */
-wire();
-renderStatus();
-loadAll();
+<script type="module" src="./app.js"></script>
+</body>
+</html>
