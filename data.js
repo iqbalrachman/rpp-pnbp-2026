@@ -316,9 +316,70 @@ export function normRpp(rows) {
       bench: raw.BENCH.text,
       link: raw.LINK.text,
       richCells: { hukum: raw.HUKUM, link: raw.LINK },
+      // Every source column in order, so unmapped columns stay visible in the drawer.
+      cols: r.map((_, i) => ({
+        label: headerRow >= 0 ? headerText(rows[headerRow][i]) : '',
+        text: cellData(r, i).text,
+      })),
     });
   }
   return out;
+}
+
+/* Merge rows from `other` into `base` (mutates base). Only empty base cells are
+ * filled from other; differing non-empty values keep base. Returns counts. */
+const MERGE_TEXT_FIELDS = ['satuan', 'tarif', 'uke', 'output', 'hukum', 'deskripsi', 'pengguna', 'rata3', 'proyeksi', 'pendapatan', 'bench', 'link'];
+
+function mergeKey(row, seen) {
+  const base = `${row.idBaru ?? ''}|${row.idLama}|${row.no}`;
+  const n = (seen.get(base) || 0) + 1;
+  seen.set(base, n);
+  return `${base}#${n}`;
+}
+
+export function mergeRpp(base, other) {
+  let filled = 0;
+  let diff = 0;
+  const otherMap = new Map();
+  const otherSeen = new Map();
+  for (const row of other || []) otherMap.set(mergeKey(row, otherSeen), row);
+  const baseSeen = new Map();
+  for (const row of base || []) {
+    const match = otherMap.get(mergeKey(row, baseSeen));
+    if (!match) continue;
+    for (const field of MERGE_TEXT_FIELDS) {
+      const a = String(row[field] ?? '').trim();
+      const b = String(match[field] ?? '').trim();
+      if (!a && b) { row[field] = match[field]; filled++; }
+      else if (a && b && a !== b) diff++;
+    }
+    // Rich cells: text differences are already counted above via hukum/link.
+    const rc = row.richCells || {};
+    const mc = match.richCells || {};
+    if (mc.hukum && !String((rc.hukum && rc.hukum.text) || '').trim() && String(mc.hukum.text || '').trim()) {
+      row.richCells = { ...rc, hukum: mc.hukum };
+    }
+    if (mc.link && rc.link) {
+      const baseText = String(rc.link.text || '').trim();
+      const otherText = String(mc.link.text || '').trim();
+      if (!baseText && otherText) row.richCells = { ...(row.richCells || {}), link: mc.link };
+      else if (baseText && !(rc.link.links || []).length && (mc.link.links || []).length) {
+        row.richCells = { ...(row.richCells || {}), link: { ...rc.link, links: mc.link.links.map((l) => ({ ...l })) } };
+        filled++;
+      }
+    } else if (mc.link && !rc.link) {
+      row.richCells = { ...rc, link: mc.link };
+    }
+    if (Array.isArray(row.cols) && Array.isArray(match.cols) && row.cols.length === match.cols.length) {
+      row.cols = row.cols.map((col, i) => {
+        const a = String((col && col.text) || '').trim();
+        const b = String((match.cols[i] && match.cols[i].text) || '').trim();
+        if (!a && b) return { ...col, text: match.cols[i].text };
+        return col;
+      });
+    }
+  }
+  return { filled, diff };
 }
 
 /* PP47-2018 rows -> { oldMap, hapusList }
