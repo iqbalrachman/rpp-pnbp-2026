@@ -21,11 +21,13 @@ Buka `http://localhost:8000`. Jangan membuka `index.html` langsung melalui skema
 
 ## Alur dan integritas data
 
-1. `app.js` mencoba beberapa endpoint **live** Google Sheets untuk RPP dan PP 47/2018; endpoint alternatif hanya dipakai jika masih mengambil sheet live.
-2. CSV diproses oleh parser yang mendukung koma, kutip, dan baris baru di dalam sel. Respons gviz mempertahankan teks sel dan metadata hyperlink yang memang dikirim sumber.
+1. `app.js` membaca RPP dari dua sumber **live** secara paralel: **Published CSV** (`pub-csv`) dan **gviz JSON** (`gviz-jsonp`). CSV menjadi dasar karena memuat teks persis seperti tampilan sheet. gviz dipakai sebagai pelengkap: hanya sel yang kosong di CSV yang diisi dari gviz, dan metadata hyperlink diambil dari gviz. Jika kedua sumber utama gagal, endpoint lain di `rppSources()` dicoba berurutan sebagai cadangan.
+2. CSV diproses oleh parser yang mendukung koma, kutip, dan baris baru di dalam sel. Respons gviz mempertahankan teks sel dan metadata hyperlink yang memang dikirim sumber. Penggabungan dilakukan per baris (dicocokkan dengan ID Baru, ID Lama, dan No, dengan penghitung untuk ID ganda) oleh `mergeRpp` di `data.js`. Teks yang sudah terisi di CSV tidak pernah ditimpa.
 3. `normRpp` memetakan header dengan alias eksplisit. Jika header yang dikenali tidak memuat kolom yang diperlukan, sumber ditolak dan endpoint live berikutnya dicoba; aplikasi tidak diam-diam menampilkan kolom yang tak terpetakan sebagai data kosong. Pemetaan posisi hanya menjadi fallback ketika feed tidak menyediakan header yang dikenali.
 4. Isi teks field drawer tidak diringkas atau dipotong. Dasar Hukum dan Link Surat menampilkan teks sel serta target hyperlink yang berhasil diberikan sumber. Jika target tautan tidak tersedia dari sumber live, aplikasi memberi peringatan dan tidak membuat URL pencarian pengganti.
-5. Hierarki layanan ditampilkan dari detail ke induk: Detil → Nama → Subjenis → Jenis. Pengelompokan konteks dihitung ulang dari baris yang terlihat setelah filter atau pengurutan.
+5. Hierarki layanan ditampilkan dari atas ke bawah: Jenis → Subjenis → Nama → Detil, dengan nama layanan (tebal) di bagian paling bawah. Pengelompokan konteks dihitung ulang dari baris yang terlihat setelah filter atau pengurutan. Ikon dipilih dari nama layanan itu sendiri lebih dulu, baru dari kategori induk.
+6. Drawer detail RPP memiliki bagian **"Semua kolom sumber"** yang berisi semua kolom sheet yang terisi, dengan label header dari sumber. Bagian ini menjadi jaring pengaman: kolom yang belum dipetakan tetap terlihat.
+7. Notice di halaman menampilkan jumlah sel yang dilengkapi dari sumber lain (`merge.filled`) dan jumlah sel yang berbeda antar sumber (`merge.diff`). Untuk sel yang berbeda, teks yang ditampilkan adalah versi CSV.
 
 Aplikasi **tidak menggunakan snapshot offline atau `localStorage`**. Jika semua sumber live gagal, aplikasi menampilkan status gagal, bukan data lama.
 
@@ -37,7 +39,7 @@ Aplikasi **tidak menggunakan snapshot offline atau `localStorage`**. Jika semua 
 
 ## Pengujian
 
-Test data memakai test runner bawaan Node.js, tanpa dependensi tambahan:
+Test memakai test runner bawaan Node.js, tanpa dependensi tambahan. `tests/data.test.js` menguji parser dan normalisasi; `tests/merge.test.js` menguji `mergeRpp` dan `cols` dengan fixture sintetis:
 
 ```sh
 npm test

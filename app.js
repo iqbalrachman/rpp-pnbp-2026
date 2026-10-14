@@ -3,7 +3,7 @@
  * ==========================================================================*/
 import {
   CONFIG, rppSources, hapusSources,
-  parseCSV, gvizToRows, normRpp, normPP47,
+  parseCSV, gvizToRows, normRpp, mergeRpp, normPP47,
   hierarchy, classifyTarif, fmtTarif, percentChange,
   resolveUke, sortRows, computeStats,
 } from './data.js';
@@ -68,37 +68,66 @@ const needsLinkTarget = (value) => {
   return !!text && !/^[-–—]+$/.test(text);
 };
 
-/* Try live candidates, preferring full rows and exposed link targets. Never fabricates. */
+/* Read one RPP source. Throws on fetch/parse errors or zero valid rows. */
+async function readRpp(src) {
+  let rows;
+  if (src.kind === 'jsonp') {
+    rows = gvizToRows(await loadJsonp(src.url));
+  } else {
+    const text = await fetchText(src.url);
+    rows = src.format === 'json' ? gvizToRows(jsonFromGvizText(text)) : parseCSV(text);
+  }
+  const rpp = normRpp(rows);
+  if (!rpp.length) throw new Error('0 baris valid');
+  return { rpp, source: src, linkWarnings: findLinkWarnings(rpp) };
+}
+
+function findLinkWarnings(rpp) {
+  return rpp.filter((row) => needsLinkTarget(row.link) &&
+    !(row.richCells && row.richCells.link && row.richCells.link.links.length))
+    .map((row) => row.idBaru != null ? row.idBaru : row.idLama);
+}
+
+/* CSV (exact sheet text) and gviz (links + typed cells) are read in parallel.
+ * CSV is the base; gviz only fills cells that are empty in CSV. Never fabricates.
+ * If both primaries fail, the remaining sources are tried in order as fallback. */
 async function loadRpp() {
   const attempts = [];
-  let best = null;
-  for (const src of rppSources()) {
-    try {
-      let rows;
-      if (src.kind === 'jsonp') {
-        const json = await loadJsonp(src.url);
-        rows = gvizToRows(json);
-      } else {
-        const text = await fetchText(src.url);
-        rows = src.format === 'json' ? gvizToRows(jsonFromGvizText(text)) : parseCSV(text);
-      }
-      const rpp = normRpp(rows);
-      if (!rpp.length) throw new Error('0 baris valid');
-      const linkWarnings = rpp.filter((row) => needsLinkTarget(row.link) &&
-        !(row.richCells && row.richCells.link && row.richCells.link.links.length))
-        .map((row) => row.idBaru != null ? row.idBaru : row.idLama);
-      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: rpp.length, linkWarnings: linkWarnings.length });
-      if (!best || rpp.length > best.rpp.length ||
-          (rpp.length === best.rpp.length && linkWarnings.length < best.linkWarnings.length)) {
-        best = { rpp, source: src, linkWarnings };
-      }
-      // A direct gviz response with every non-placeholder Link Surat target exposed is sufficient.
-      if (best.source.id === src.id && src.format === 'json' && best.linkWarnings.length === 0) break;
-    } catch (e) {
-      attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
+  const sources = rppSources();
+  const primaryIds = ['pub-csv', 'gviz-jsonp'];
+  const outcomeOf = (src) => readRpp(src).then(
+    (res) => ({ src, res }),
+    (err) => ({ src, err }),
+  );
+  const record = (o) => attempts.push(o.res
+    ? { id: o.src.id, label: o.src.label, status: 'ok', rows: o.res.rpp.length, linkWarnings: o.res.linkWarnings.length }
+    : { id: o.src.id, label: o.src.label, status: 'fail', error: o.err.message });
+
+  const primary = await Promise.all(sources.filter((s) => primaryIds.includes(s.id)).map(outcomeOf));
+  primary.forEach(record);
+  let ok = primary.filter((o) => o.res).map((o) => o.res);
+
+  if (!ok.length) {
+    for (const src of sources.filter((s) => !primaryIds.includes(s.id))) {
+      const o = await outcomeOf(src);
+      record(o);
+      if (o.res) { ok = [o.res]; break; }
     }
   }
-  return best ? { ...best, attempts } : { rpp: [], source: null, attempts, linkWarnings: [] };
+  if (!ok.length) return { rpp: [], source: null, attempts, linkWarnings: [] };
+
+  const base = ok.find((r) => r.source.format === 'csv') || ok[0];
+  const merge = { filled: 0, diff: 0 };
+  for (const other of ok) {
+    if (other === base) continue;
+    const m = mergeRpp(base.rpp, other.rpp);
+    merge.filled += m.filled;
+    merge.diff += m.diff;
+  }
+  return {
+    rpp: base.rpp, source: base.source, attempts,
+    linkWarnings: findLinkWarnings(base.rpp), merge,
+  };
 }
 
 /* HAPUS detail: loop gid 0..10, first published tab that has real id rows wins. */
@@ -127,7 +156,7 @@ async function loadAll() {
   state.hapus = h.hapusList;
   state.oldMap = h.oldMap;
   state.loaded = {
-    rpp: { source: r.source, attempts: r.attempts, linkWarnings: r.linkWarnings || [] },
+    rpp: { source: r.source, attempts: r.attempts, linkWarnings: r.linkWarnings || [], merge: r.merge || { filled: 0, diff: 0 } },
     hapus: { source: h.source, attempts: h.attempts },
   };
   state.ukeList = [...new Set(
@@ -150,6 +179,9 @@ function renderNotice() {
   const issues = [];
   if (!state.loaded.rpp?.source) issues.push('Sumber live RPP gagal dimuat; data cache tidak digunakan.');
   if (!state.loaded.hapus?.source) issues.push('Sumber live HAPUS gagal dimuat; data cache tidak digunakan.');
+  const merge = state.loaded.rpp?.merge;
+  if (merge && merge.filled > 0) issues.push(`${merge.filled} sel kosong dilengkapi dari sumber lain.`);
+  if (merge && merge.diff > 0) issues.push(`${merge.diff} sel berbeda antar sumber; teks yang ditampilkan adalah versi CSV.`);
   const warnings = state.loaded.rpp?.linkWarnings || [];
   if (warnings.length) {
     const sample = warnings.slice(0, 6).join(', ');
@@ -161,13 +193,17 @@ function renderNotice() {
 
 /* ------------------------------- helpers -------------------------------- */
 function iconFor(row) {
-  const text = [row.jenis, row.subjenis, row.nama, row.detil, row.namaLama, row.pathLama && row.pathLama.join(' ')]
-    .filter(Boolean).join(' ').toLowerCase();
-  if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '\u2708\ufe0f';
-  if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '\ud83c\udf0a';
-  if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '\ud83c\udf0b';
-  if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '\ud83c\udf21\ufe0f';
-  return '\ud83c\udf24\ufe0f';
+  // Match the service's own name first, so a parent category does not decide the icon.
+  const pick = (text) => {
+    if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '\u2708\ufe0f';
+    if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '\ud83c\udf0a';
+    if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '\ud83c\udf0b';
+    if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '\ud83c\udf21\ufe0f';
+    return null;
+  };
+  const own = [row.detil, row.nama, row.namaLama].filter(Boolean).join(' ').toLowerCase();
+  const parent = [row.subjenis, row.jenis, ...(row.pathLama || [])].filter(Boolean).join(' ').toLowerCase();
+  return pick(own) || pick(parent) || '\ud83c\udf24\ufe0f';
 }
 
 function katBadge(kat) {
@@ -272,7 +308,7 @@ function tarifCell(row) {
   const nt = classifyTarif(row.tarif);
   const newTxt = fmtTarif(nt) || '—';
   if (row.kategori === 'BARU') {
-    return `<div class="tarif"><span class="t-old">—</span><span class="arrow">&rarr;</span>` +
+    return `<div class="tarif">` +
       `<b class="t-green">${esc(newTxt)}</b>` +
       (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
   }
@@ -319,12 +355,12 @@ function hierCell(row, visibleParents, sharedParentCount) {
   const icon = `<span class="icon" aria-hidden="true">${iconFor(row)}</span>`;
   const parts = hierarchyParts(row);
   const leafClass = row.type === 'hapus' ? 'leaf leaf-hapus' : 'leaf';
-  const fullPath = [parts.primary, ...parts.parents.slice().reverse()].filter(Boolean).join(' › ');
-  const displayedParents = visibleParents.slice().reverse();
-  const parentHtml = displayedParents.length
-    ? `<span class="parents" style="padding-left:${Math.min(sharedParentCount * 8, 24)}px">${displayedParents.map((p) => esc(p)).join(' <i>›</i> ')}</span>` : '';
+  // Top-down: parents (Jenis › Subjenis › Nama) above, the service itself below in bold.
+  const fullPath = [...parts.parents, parts.primary].filter(Boolean).join(' › ');
+  const parentHtml = visibleParents.length
+    ? `<span class="parents" style="padding-left:${Math.min(sharedParentCount * 8, 24)}px">${visibleParents.map((p) => esc(p)).join(' <i>›</i> ')}</span>` : '';
   return `<div class="hier" title="${esc(fullPath)}" aria-label="${esc(fullPath)}">${icon}` +
-    `<span class="${leafClass}">${esc(parts.primary)}</span>${parentHtml}</div>`;
+    `${parentHtml}<span class="${leafClass}">${esc(parts.primary)}</span></div>`;
 }
 
 function rowHtml(item, visibleParents, sharedParentCount, isGroupStart) {
@@ -419,7 +455,7 @@ function openDrawer(kind, row) {
       ` &middot; UKE II <b>${esc(row.uke || '—')}</b> &middot; Tarif <b>${esc(tarifTxt)}</b></div>`;
     // Preserve the complete hierarchy and source text in the detail drawer.
     body.innerHTML =
-      field('Hierarki Layanan', h.bottomUp.join(' › ')) +
+      field('Hierarki Layanan', [...h.parents, h.leaf].filter((p) => p && p !== '—').join(' › ')) +
       field('Output/Tipe Data (Kolom J)', row.output) +
       fieldRich('Dasar Hukum (selain UU 31/2009 dan Perpres 20/2024)', row.richCells && row.richCells.hukum) +
       field('Deskripsi Layanan dan Parameter Layanan', row.deskripsi) +
@@ -429,6 +465,10 @@ function openDrawer(kind, row) {
       field('Pendapatan dalam 3 Tahun Terakhir dan/atau Perkiraan Pendapatan', row.pendapatan) +
       field('Benchmarking Layanan dari Instansi Lain dan/atau Pihak Swasta (jika ada)', row.bench) +
       fieldRich('Link Surat', row.richCells && row.richCells.link, true);
+    const extra = (row.cols || []).map((c, i) => ({ label: c.label, text: c.text, index: i + 1 }))
+      .filter((c) => String(c.text || '').trim() !== '');
+    body.innerHTML += `<details class="allcols"><summary>Semua kolom sumber (${extra.length} terisi)</summary>` +
+      extra.map((c) => field(c.label || `Kolom ${c.index}`, c.text)).join('') + `</details>`;
   } else {
     const tarifTxt = (fmtTarif(classifyTarif(row.tarifLama)) || '—') + (row.satuanLama ? ' \u00b7 ' + row.satuanLama : '');
     $('#drawerTitle').textContent = 'Penjelasan HAPUS (PP 47/2018)';
@@ -438,7 +478,7 @@ function openDrawer(kind, row) {
     const hPath = hierarchyParts(row);
     body.innerHTML =
       `<div class="warn">Data Penjelasan HAPUS diambil dari kolom P &amp; X sheet PP 47/2018 (gid 0) &mdash; tanpa data contoh.</div>` +
-      field('Hierarki Layanan', [hPath.primary, ...hPath.parents.slice().reverse()].filter(Boolean).join(' › ')) +
+      field('Hierarki Layanan', [...hPath.parents, hPath.primary].filter(Boolean).join(' › ')) +
       field('Kategori Penghapusan (kolom P)', row.alasan) +
       field('Penjelasan (kolom X)', row.penjelasan);
   }
@@ -613,4 +653,14 @@ function wire() {
 /* --------------------------------- boot --------------------------------- */
 wire();
 renderStatus();
+/* Keep the sticky table header directly under the toolbar, whatever its height. */
+function syncToolbarHeight() {
+  const tb = document.querySelector('.toolbar');
+  if (!tb) return;
+  const set = () => document.documentElement.style.setProperty('--toolbar-h', tb.offsetHeight + 'px');
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(tb);
+  else window.addEventListener('resize', set);
+}
+syncToolbarHeight();
 loadAll();
