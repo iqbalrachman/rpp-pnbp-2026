@@ -14,9 +14,9 @@ const state = {
   visible: [],               // filtered + sorted rows currently rendered
   ukeList: [],
   loading: true,
-  loaded: { rpp: null, hapus: null },   // {source, error}
-  usingSnapshot: false, snapshotAt: null,
+  loaded: { rpp: null, hapus: null },   // live source + diagnostics
   stats: null,
+  sort: { key: 'id', direction: 'asc' },
   filters: { q: '', uke: new Set(), kategori: 'SEMUA', showHapus: false },
 };
 
@@ -30,7 +30,7 @@ async function fetchText(url, timeout = 15000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { mode: 'cors', redirect: 'follow', signal: ctrl.signal });
+    const res = await fetch(url, { mode: 'cors', cache: 'no-store', redirect: 'follow', signal: ctrl.signal });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.text();
   } finally { clearTimeout(t); }
@@ -51,7 +51,8 @@ function loadJsonp(url, timeout = 12000) {
     const timer = setTimeout(() => { if (!settled) { settled = true; cleanup(); reject(new Error('timeout')); } }, timeout);
     window[cb] = (data) => { if (settled) return; settled = true; cleanup(); resolve(data); };
     script.onerror = () => { if (!settled) { settled = true; cleanup(); reject(new Error('script load error')); } };
-    script.src = url.replace('out:json', 'out:json;responseHandler:' + cb);
+    const liveUrl = url.replace('out:json', 'out:json;responseHandler:' + cb);
+    script.src = `${liveUrl}${liveUrl.includes('?') ? '&' : '?'}_live=${Date.now()}`;
     document.head.appendChild(script);
   });
 }
@@ -62,9 +63,15 @@ function jsonFromGvizText(text) {
   return JSON.parse(text.slice(a, b + 1));
 }
 
-/* Try every candidate until one yields usable RPP rows. Never fabricates. */
+const needsLinkTarget = (value) => {
+  const text = String(value == null ? '' : value).trim();
+  return !!text && !/^[-–—]+$/.test(text);
+};
+
+/* Try live candidates, preferring full rows and exposed link targets. Never fabricates. */
 async function loadRpp() {
   const attempts = [];
+  let best = null;
   for (const src of rppSources()) {
     try {
       let rows;
@@ -77,13 +84,21 @@ async function loadRpp() {
       }
       const rpp = normRpp(rows);
       if (!rpp.length) throw new Error('0 baris valid');
-      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: rpp.length });
-      return { rpp, source: src, attempts };
+      const linkWarnings = rpp.filter((row) => needsLinkTarget(row.link) &&
+        !(row.richCells && row.richCells.link && row.richCells.link.links.length))
+        .map((row) => row.idBaru != null ? row.idBaru : row.idLama);
+      attempts.push({ id: src.id, label: src.label, status: 'ok', rows: rpp.length, linkWarnings: linkWarnings.length });
+      if (!best || rpp.length > best.rpp.length ||
+          (rpp.length === best.rpp.length && linkWarnings.length < best.linkWarnings.length)) {
+        best = { rpp, source: src, linkWarnings };
+      }
+      // A direct gviz response with every non-placeholder Link Surat target exposed is sufficient.
+      if (best.source.id === src.id && src.format === 'json' && best.linkWarnings.length === 0) break;
     } catch (e) {
       attempts.push({ id: src.id, label: src.label, status: 'fail', error: e.message });
     }
   }
-  return { rpp: [], source: null, attempts };
+  return best ? { ...best, attempts } : { rpp: [], source: null, attempts, linkWarnings: [] };
 }
 
 /* HAPUS detail: loop gid 0..10, first published tab that has real id rows wins. */
@@ -106,36 +121,13 @@ async function loadHapus() {
 async function loadAll() {
   state.loading = true;
   renderStatus();
-  let [r, h] = await Promise.all([loadRpp(), loadHapus()]);
-
-  // Last resort: same-origin snapshot of REAL data (never demo rows).
-  // Guarantees the table renders even if every remote source is blocked
-  // (CORS, iframe sandbox, offline). Clearly labelled as a snapshot.
-  let snap = null;
-  if (!r.rpp.length || !h.hapusList.length) {
-    try { snap = await fetch('./snapshot.json', { cache: 'no-store' }).then((x) => {
-      if (!x.ok) throw new Error('HTTP ' + x.status); return x.json();
-    }); } catch (e) { snap = null; }
-  }
-  if (snap) {
-    if (!r.rpp.length && Array.isArray(snap.rpp) && snap.rpp.length) {
-      r = { rpp: snap.rpp, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
-            attempts: [...r.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.rpp.length }] };
-      state.usingSnapshot = true;
-    }
-    if (!h.hapusList.length && Array.isArray(snap.hapus) && snap.hapus.length) {
-      h = { oldMap: snap.oldMap || {}, hapusList: snap.hapus, source: { id: 'snapshot', label: 'Snapshot lokal (data asli)' },
-            attempts: [...h.attempts, { id: 'snapshot', label: 'Snapshot lokal', status: 'ok', rows: snap.hapus.length }] };
-      state.usingSnapshot = true;
-    }
-    state.snapshotAt = snap.capturedAt || null;
-  }
+  const [r, h] = await Promise.all([loadRpp(), loadHapus()]);
 
   state.rpp = r.rpp;
   state.hapus = h.hapusList;
   state.oldMap = h.oldMap;
   state.loaded = {
-    rpp: { source: r.source, attempts: r.attempts },
+    rpp: { source: r.source, attempts: r.attempts, linkWarnings: r.linkWarnings || [] },
     hapus: { source: h.source, attempts: h.attempts },
   };
   state.ukeList = [...new Set(
@@ -153,12 +145,18 @@ async function loadAll() {
 }
 
 function renderNotice() {
-  const el = $('#notice'); if (!el) return;
-  if (!state.usingSnapshot) { el.hidden = true; el.innerHTML = ''; return; }
-  const when = state.snapshotAt ? new Date(state.snapshotAt).toLocaleString('id-ID') : '—';
-  el.hidden = false;
-  el.innerHTML = '&#9888;&#65039; Sumber langsung tidak dapat dijangkau, sehingga tabel memuat ' +
-    '<b>snapshot data asli</b> (diambil ' + esc(when) + '). Tekan <b>Muat ulang</b> untuk mencoba live lagi.';
+  const el = $('#notice');
+  if (!el) return;
+  const issues = [];
+  if (!state.loaded.rpp?.source) issues.push('Sumber live RPP gagal dimuat; data cache tidak digunakan.');
+  if (!state.loaded.hapus?.source) issues.push('Sumber live HAPUS gagal dimuat; data cache tidak digunakan.');
+  const warnings = state.loaded.rpp?.linkWarnings || [];
+  if (warnings.length) {
+    const sample = warnings.slice(0, 6).join(', ');
+    issues.push(`${warnings.length} Link Surat berisi teks tanpa target hyperlink dari sumber live (ID ${sample}${warnings.length > 6 ? ', …' : ''}). Teks tetap ditampilkan; URL tidak ditebak.`);
+  }
+  el.hidden = issues.length === 0;
+  el.textContent = issues.join(' ');
 }
 
 /* ------------------------------- helpers -------------------------------- */
@@ -190,7 +188,9 @@ function currentRows() {
   base.forEach((row, i) => {
     const info = ukeResolved[i];
     if (f.uke.size && !f.uke.has(info.uke)) return;
-    if (f.kategori !== 'SEMUA') {
+    if (f.kategori === 'HAPUS') {
+      if (row.type !== 'hapus') return;
+    } else if (f.kategori !== 'SEMUA') {
       if (row.type === 'hapus' || row.kategori !== f.kategori) return;
     }
     if (q) {
@@ -203,29 +203,52 @@ function currentRows() {
     }
     out.push({ row, uke: info.uke, inherited: info.inherited });
   });
-  return { items: out, raw: base, ukeResolved };
+  return { items: out };
 }
 
 /* -------------------------------- render -------------------------------- */
 function renderHero() {
-  const s = state.stats || { semula: 0, rpp: 0, baru: 0, ubah: 0, tetap: 0, hapus: 0, pct: {} };
-  const sum = (s.baru + s.ubah + s.tetap + s.hapus) || 1;
-  const seg = (n, cls) => `<span class="seg ${cls}" style="width:${(n / sum) * 100}%"></span>`;
-  $('#pills').innerHTML = `
-    <span class="pill pill-total"><b>${s.semula}</b> SEMULA</span>
-    <span class="pill"><b>${s.rpp}</b> RPP</span>
-    <span class="pill pill-green"><b>${s.baru}</b> BARU</span>
-    <span class="pill pill-amber"><b>${s.ubah}</b> UBAH</span>
-    <span class="pill pill-blue"><b>${s.tetap}</b> TETAP</span>
-    <span class="pill pill-red"><b>${s.hapus}</b> HAPUS</span>`;
-  $('#progress').innerHTML =
-    seg(s.baru, 'seg-green') + seg(s.ubah, 'seg-amber') + seg(s.tetap, 'seg-blue') + seg(s.hapus, 'seg-red');
+  const s = state.stats || { semula: 0, rpp: 0, baru: 0, ubah: 0, tetap: 0, hapus: 0 };
+  const categories = [
+    { key: 'BARU', count: s.baru, cls: 'seg-green' },
+    { key: 'UBAH', count: s.ubah, cls: 'seg-amber' },
+    { key: 'TETAP', count: s.tetap, cls: 'seg-blue' },
+    { key: 'HAPUS', count: s.hapus, cls: 'seg-red' },
+  ];
+  const total = categories.reduce((n, item) => n + item.count, 0);
+  const denominator = total || 1;
+  $('#semulaCount').textContent = s.semula.toLocaleString('id-ID');
+  $('#rppCount').textContent = s.rpp.toLocaleString('id-ID');
+  $('#datasetSummary').textContent =
+    `${s.semula.toLocaleString('id-ID')} layanan semula · ${s.rpp.toLocaleString('id-ID')} layanan dalam usulan RPP 2026`;
+  $('#chartTotal').textContent = `${total.toLocaleString('id-ID')} perubahan`;
+  $('#progress').setAttribute('aria-label', `Komposisi ${total} baris perubahan`);
+  $('#progress').innerHTML = categories.map((item) =>
+    `<span class="seg ${item.cls}" style="width:${(item.count / denominator) * 100}%"></span>`
+  ).join('');
+  $('#chartLegend').innerHTML = categories.map((item) =>
+    `<span>${item.key} <b>${Math.round((item.count / denominator) * 100)}%</b></span>`
+  ).join('');
+  $('#pills').innerHTML = categories.map((item) => {
+    const active = state.filters.kategori === item.key;
+    const pct = Math.round((item.count / denominator) * 100);
+    return `<button type="button" class="filter-chip ${active ? 'active' : ''}" data-filter="${item.key}" aria-pressed="${active}">` +
+      `<span class="chip-label">${item.key}</span>` +
+      `<span class="chip-value"><b>${item.count.toLocaleString('id-ID')}</b><small>${pct}%</small></span></button>`;
+  }).join('');
+}
+
+function ukeHue(value) {
+  const count = Math.max(state.ukeList.length, 1);
+  const index = Math.max(0, state.ukeList.indexOf(value));
+  return Math.round((index * 360) / count);
 }
 
 function buildUkeFilter() {
   const box = $('#ukeMenuItems');
   box.innerHTML = state.ukeList.map((u) =>
-    `<label class="chk"><input type="checkbox" value="${esc(u)}" ${state.filters.uke.has(u) ? 'checked' : ''}><span>${esc(u)}</span></label>`
+    `<label class="chk" style="--uke-hue:${ukeHue(u)}"><input type="checkbox" value="${esc(u)}" ${state.filters.uke.has(u) ? 'checked' : ''}>` +
+    `<span class="uke-swatch" aria-hidden="true"></span><span class="uke-name">${esc(u)}</span></label>`
   ).join('');
   box.querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('change', () => {
@@ -259,8 +282,9 @@ function tarifCell(row) {
     const pc = oldT ? percentChange(oldT, nt) : null;
     let badge = '';
     if (pc != null) {
-      const up = pc > 0;
-      badge = `<span class="chip ${up ? 'chip-up' : (pc < 0 ? 'chip-down' : 'chip-flat')}">${up ? '+' : ''}${pc}%</span>`;
+      const tone = Math.abs(pc) < 30 ? 'chip-change-small' : 'chip-change-large';
+      const direction = pc > 0 ? '&#9650; ' : (pc < 0 ? '&#9660; ' : '');
+      badge = `<span class="chip ${tone}" title="Perubahan tarif: ${Math.abs(pc)}% secara absolut">${direction}${pc > 0 ? '+' : ''}${pc}%</span>`;
     } else if (oldT && oldT.raw) {
       badge = `<span class="chip chip-flat">dari ${esc(fmtTarif(oldT))}</span>`;
     }
@@ -269,49 +293,55 @@ function tarifCell(row) {
   }
   // TETAP
   return `<div class="tarif"><b class="t-blue">${esc(newTxt)}</b>` +
-    `<span class="chip chip-flat">0%</span>` +
+    `<span class="chip chip-change-small" title="Tidak ada perubahan tarif">0%</span>` +
     (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
 }
 
 function idCell(row) {
-  if (row.type === 'hapus') {
-    return `<div class="idcol"><div class="idbaru id-hapus">${esc(row.idLama)}</div></div>`;
-  }
-  const bar = row.idBaru != null ? `<div class="idbaru">ID: ${esc(row.idBaru)}</div>` : '';
-  const lama = row.idLama ? `<div class="idlama">&#9492;&#9472; ${esc(row.idLama)}</div>` : '';
-  return `<div class="idcol">${bar}${lama}</div>`;
+  const isHapus = row.type === 'hapus';
+  const visibleId = isHapus ? row.idLama : (row.idBaru != null ? `ID: ${row.idBaru}` : '—');
+  const badge = katBadge(isHapus ? 'HAPUS' : row.kategori);
+  const old = !isHapus && row.idLama ? `<div class="idlama">Lama: ${esc(row.idLama)}</div>` : '';
+  return `<div class="idcol"><div class="idline"><span class="idbaru ${isHapus ? 'id-hapus' : ''}">${esc(visibleId)}</span>${badge}</div>${old}</div>`;
 }
 
-function hierCell(row) {
-  const icon = `<span class="icon">${iconFor(row)}</span>`;
+function hierarchyParts(row) {
   if (row.type === 'hapus') {
-    const path = (row.pathLama || []).join(' &rsaquo; ');
-    return `<div class="hier">${icon}<span class="parents">${esc(path)}</span>` +
-      `<span class="leaf leaf-hapus">${esc(row.namaLama)}</span></div>`;
+    const path = row.pathLama || [];
+    const parents = path.length && path[path.length - 1] === row.namaLama ? path.slice(0, -1) : path;
+    return { kind: 'hapus', primary: row.namaLama || row.idLama || '—', parents };
   }
   const h = hierarchy(row);
-  const parents = h.parents.map((p) => esc(p)).join(' <i>&rsaquo;</i> ');
-  return `<div class="hier">${icon}` +
-    (parents ? `<span class="parents">${parents} <i>&rsaquo;</i> </span>` : '') +
-    `<span class="leaf">${esc(h.leaf)}</span></div>`;
+  return { kind: 'rpp', primary: h.leaf, parents: h.parents };
 }
 
-function rowHtml(item) {
+function hierCell(row, visibleParents, sharedParentCount) {
+  const icon = `<span class="icon" aria-hidden="true">${iconFor(row)}</span>`;
+  const parts = hierarchyParts(row);
+  const leafClass = row.type === 'hapus' ? 'leaf leaf-hapus' : 'leaf';
+  const fullPath = [parts.primary, ...parts.parents.slice().reverse()].filter(Boolean).join(' › ');
+  const displayedParents = visibleParents.slice().reverse();
+  const parentHtml = displayedParents.length
+    ? `<span class="parents" style="padding-left:${Math.min(sharedParentCount * 8, 24)}px">${displayedParents.map((p) => esc(p)).join(' <i>›</i> ')}</span>` : '';
+  return `<div class="hier" title="${esc(fullPath)}" aria-label="${esc(fullPath)}">${icon}` +
+    `<span class="${leafClass}">${esc(parts.primary)}</span>${parentHtml}</div>`;
+}
+
+function rowHtml(item, visibleParents, sharedParentCount, isGroupStart) {
   const { row, uke, inherited } = item;
   const isHapus = row.type === 'hapus';
-  const cls = isHapus ? 'row row-hapus' : 'row';
+  const cls = `${isHapus ? 'row row-hapus' : 'row'}${isGroupStart ? ' row-group-start' : ''}`;
+  const hue = uke ? ukeHue(uke) : 0;
   const ukePill = uke
-    ? `<span class="ukepill ${inherited ? 'uke-inherited' : ''}" title="${inherited ? 'Inherited from above' : 'UKE II: ' + esc(uke)}">${esc(uke)}</span>`
+    ? `<span class="ukepill ${inherited ? 'uke-inherited' : ''}" style="--uke-hue:${hue}" title="${inherited ? 'UKE II diwarisi dari baris sebelumnya' : 'UKE II: ' + esc(uke)}">${esc(uke)}</span>`
     : `<span class="uke-empty">—</span>`;
-  const kat = isHapus ? katBadge('HAPUS') : katBadge(row.kategori);
   const act = isHapus
     ? `<button class="act act-hapus" data-act="hapus" title="Penjelasan HAPUS (PP 47/2018)">${ICON_FILE}</button>`
-    : `<button class="act" data-act="rpp" title="Detail 7 field">${ICON_EYE}</button>`;
+    : `<button class="act" data-act="rpp" title="Lihat seluruh data detail">${ICON_EYE}</button>`;
   return `<tr class="${cls}" data-key="${esc(keyOf(row))}">` +
     `<td class="td-id">${idCell(row)}</td>` +
-    `<td class="td-hier">${hierCell(row)}</td>` +
+    `<td class="td-hier">${hierCell(row, visibleParents, sharedParentCount)}</td>` +
     `<td class="td-uke">${ukePill}</td>` +
-    `<td class="td-kat">${kat}</td>` +
     `<td class="td-tarif">${tarifCell(row)}</td>` +
     `<td class="td-act">${act}</td></tr>`;
 }
@@ -323,25 +353,56 @@ function keyOf(row) {
   return row.type === 'hapus' ? 'H:' + row.idLama : 'R:' + (row.idBaru != null ? row.idBaru : row.idLama);
 }
 
+function renderSortControls() {
+  const select = $('#sortBy');
+  if (select) select.value = state.sort.key;
+  const direction = $('#sortDirection');
+  if (direction) {
+    const ascending = state.sort.direction === 'asc';
+    direction.textContent = ascending ? '↑' : '↓';
+    direction.title = ascending ? 'Urut menaik' : 'Urut menurun';
+    direction.setAttribute('aria-label', direction.title);
+  }
+  document.querySelectorAll('#tableHead th[data-sort]').forEach((th) => {
+    const active = th.dataset.sort === state.sort.key;
+    th.setAttribute('aria-sort', active ? (state.sort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    const marker = th.querySelector('.sort-mark');
+    if (marker) marker.textContent = active ? (state.sort.direction === 'asc' ? '↑' : '↓') : '↕';
+  });
+}
+
 function renderTable() {
   const { items } = currentRows();
-  // sort respecting current toggle
-  const sorted = sortRows(items.map((x) => x.row), state.filters.showHapus);
-  const byKey = new Map(items.map((x) => [keyOf(x.row), x]));
-  state.visible = sorted.map((r) => byKey.get(keyOf(r))).filter(Boolean);
+  const sortableRows = items.map((item) => ({ ...item.row, _resolvedUke: item.uke }));
+  const sorted = sortRows(sortableRows, state.filters.showHapus, state.sort.key, state.sort.direction);
+  const byKey = new Map(items.map((item) => [keyOf(item.row), item]));
+  state.visible = sorted.map((row) => byKey.get(keyOf(row))).filter(Boolean);
 
+  renderSortControls();
   const tbody = $('#tbody');
   if (state.loading) {
-    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Memuat data…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="center muted">Memuat data…</td></tr>`;
     return;
   }
   if (!state.rpp.length) { renderEmpty(); return; }
   if (!state.visible.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="center muted">Tidak ada baris yang cocok dengan filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="center muted">Tidak ada baris yang cocok dengan filter.</td></tr>`;
     $('#count').textContent = '0 baris';
     return;
   }
-  tbody.innerHTML = state.visible.map(rowHtml).join('');
+  tbody.innerHTML = state.visible.map((item, index, list) => {
+    const current = hierarchyParts(item.row);
+    const previous = index ? hierarchyParts(list[index - 1].row) : null;
+    let shared = 0;
+    if (previous && current.kind === previous.kind && current.parents.length >= previous.parents.length) {
+      while (shared < previous.parents.length && current.parents[shared] === previous.parents[shared]) shared += 1;
+    }
+    const visibleParents = current.parents.slice(shared);
+    const isGroupStart = !previous || current.kind !== previous.kind ||
+      (current.parents.length > 0 && shared === 0) ||
+      (previous && current.parents.length < previous.parents.length);
+    return rowHtml(item, visibleParents, shared, isGroupStart);
+  }).join('');
   $('#count').textContent = `${state.visible.length} baris`;
 }
 
@@ -356,23 +417,28 @@ function openDrawer(kind, row) {
       `<div class="dmeta">ID BARU <b>${esc(row.idBaru != null ? row.idBaru : '—')}</b>` +
       (row.idLama ? ` &middot; ID LAMA <b class="mono">${esc(row.idLama)}</b>` : '') +
       ` &middot; UKE II <b>${esc(row.uke || '—')}</b> &middot; Tarif <b>${esc(tarifTxt)}</b></div>`;
-    // exactly the 7 DATA_DUKUNG fields requested
+    // Preserve the complete hierarchy and source text in the detail drawer.
     body.innerHTML =
-      field('Output / Tipe Data', row.output) +
-      field('Dasar Hukum', row.hukum) +
-      field('Deskripsi Layanan', row.deskripsi) +
-      field('Pengguna Saat Ini', row.pengguna) +
-      field('Rata-rata Permintaan (3 tahun)', row.rata3) +
-      field('Pendapatan 3 Tahun', row.pendapatan) +
-      field('Benchmarking', row.bench);
+      field('Hierarki Layanan', h.bottomUp.join(' › ')) +
+      field('Output/Tipe Data (Kolom J)', row.output) +
+      fieldRich('Dasar Hukum (selain UU 31/2009 dan Perpres 20/2024)', row.richCells && row.richCells.hukum) +
+      field('Deskripsi Layanan dan Parameter Layanan', row.deskripsi) +
+      field('Pengguna Saat Ini dan/atau Sasaran Pengguna', row.pengguna) +
+      field('Rata-rata Permintaan Layanan (3 Tahun Terakhir)', row.rata3) +
+      field('Proyeksi Permintaan', row.proyeksi) +
+      field('Pendapatan dalam 3 Tahun Terakhir dan/atau Perkiraan Pendapatan', row.pendapatan) +
+      field('Benchmarking Layanan dari Instansi Lain dan/atau Pihak Swasta (jika ada)', row.bench) +
+      fieldRich('Link Surat', row.richCells && row.richCells.link, true);
   } else {
     const tarifTxt = (fmtTarif(classifyTarif(row.tarifLama)) || '—') + (row.satuanLama ? ' \u00b7 ' + row.satuanLama : '');
     $('#drawerTitle').textContent = 'Penjelasan HAPUS (PP 47/2018)';
     $('#drawerSub').innerHTML = esc(row.namaLama) + katBadge('HAPUS').replace('badge', 'badge inline') +
       `<div class="dmeta">ID LAMA <b class="mono">${esc(row.idLama)}</b> &middot; UKE II <b>${esc(row.ukeLama || '—')}</b> &middot; Tarif lama <b>${esc(tarifTxt)}</b></div>`;
-    // exactly the 2 fields requested: kolom P (alasan) & X (penjelasan)
+    // Retain the full prior hierarchy while keeping both source explanation fields intact.
+    const hPath = hierarchyParts(row);
     body.innerHTML =
       `<div class="warn">Data Penjelasan HAPUS diambil dari kolom P &amp; X sheet PP 47/2018 (gid 0) &mdash; tanpa data contoh.</div>` +
+      field('Hierarki Layanan', [hPath.primary, ...hPath.parents.slice().reverse()].filter(Boolean).join(' › ')) +
       field('Kategori Penghapusan (kolom P)', row.alasan) +
       field('Penjelasan (kolom X)', row.penjelasan);
   }
@@ -382,6 +448,24 @@ function openDrawer(kind, row) {
 function field(label, val, mono) {
   const v = (val == null || String(val).trim() === '') ? '<span class="empty">—</span>' : esc(val);
   return `<div class="field"><div class="flabel">${esc(label)}</div><div class="fval ${mono ? 'mono' : ''}">${v}</div></div>`;
+}
+function fieldRich(label, source, warnMissingLink = false) {
+  const raw = String(source && source.text != null ? source.text : '');
+  const links = Array.isArray(source && source.links) ? source.links : [];
+  if (!raw.trim() && !links.length) return field(label, raw);
+  const linkHtml = links.map((link, index) => {
+    let href = '';
+    try {
+      const candidate = new URL(String(link.href || ''));
+      if (['https:', 'http:', 'mailto:'].includes(candidate.protocol)) href = candidate.href;
+    } catch (e) { /* ignore unsafe or malformed targets */ }
+    if (!href) return '';
+    const linkLabel = String(link.label || '').trim() || `Buka tautan ${index + 1}`;
+    return `<a class="source-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(linkLabel)} &#8599;</a>`;
+  }).join('');
+  const warning = warnMissingLink && needsLinkTarget(raw) && !links.length
+    ? `<div class="link-unavailable">Teks sumber ada, tetapi target hyperlink tidak dikirim oleh sumber live.</div>` : '';
+  return `<div class="field"><div class="flabel">${esc(label)}</div><div class="fval">${esc(raw)}${linkHtml ? `<div class="source-links">${linkHtml}</div>` : ''}${warning}</div></div>`;
 }
 function closeDrawer() {
   $('#drawer').classList.remove('open');
@@ -394,7 +478,7 @@ function renderEmpty() {
   const rows = a.map((x) =>
     `<li class="${x.status}">${x.status === 'ok' ? '&#10003;' : '&#10007;'} <b>${esc(x.label)}</b>` +
     (x.status === 'ok' ? ` — ${x.rows} baris` : ` — ${esc(x.error || '')}`) + `</li>`).join('');
-  $('#tbody').innerHTML = `<tr><td colspan="6"><div class="emptystate">
+  $('#tbody').innerHTML = `<tr><td colspan="5"><div class="emptystate">
     <div class="es-title">Data tidak dapat dimuat</div>
     <p>Tidak ada sumber yang berhasil. Ini <b>bukan</b> data contoh — tabel sengaja dibiarkan kosong
     daripada menampilkan data dummy.</p>
@@ -438,16 +522,66 @@ function renderFooter() {
 /* -------------------------------- events -------------------------------- */
 function wire() {
   $('#search').addEventListener('input', (e) => { state.filters.q = e.target.value; renderTable(); });
-  $('#kategori').addEventListener('change', (e) => { state.filters.kategori = e.target.value; renderTable(); });
-
+  const sortBy = $('#sortBy');
+  sortBy.addEventListener('change', () => {
+    if (sortBy.value !== state.sort.key) state.sort.direction = 'asc';
+    state.sort.key = sortBy.value;
+    renderTable();
+  });
+  $('#sortDirection').addEventListener('click', () => {
+    state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+    renderTable();
+  });
+  $('#tableHead').addEventListener('click', (e) => {
+    const sortButton = e.target.closest('button[data-sort]');
+    if (!sortButton) return;
+    const key = sortButton.dataset.sort;
+    if (state.sort.key === key) state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+    else { state.sort.key = key; state.sort.direction = 'asc'; }
+    renderTable();
+  });
+  const kategoriSelect = $('#kategori');
   const toggle = $('#hapusToggle');
-  const sync = () => {
+  const syncHapusToggle = () => {
     state.filters.showHapus = toggle.checked;
     $('#hapusWrap').classList.toggle('on', toggle.checked);
-    renderTable();
   };
-  toggle.addEventListener('change', sync);
-  sync();
+  kategoriSelect.addEventListener('change', (e) => {
+    state.filters.kategori = e.target.value;
+    if (state.filters.kategori === 'HAPUS') {
+      toggle.checked = true;
+      syncHapusToggle();
+    } else if (state.filters.kategori !== 'SEMUA') {
+      toggle.checked = false;
+      syncHapusToggle();
+    }
+    renderHero();
+    renderTable();
+  });
+  toggle.addEventListener('change', () => {
+    syncHapusToggle();
+    if (!toggle.checked && state.filters.kategori === 'HAPUS') {
+      state.filters.kategori = 'SEMUA';
+      kategoriSelect.value = 'SEMUA';
+    }
+    renderHero();
+    renderTable();
+  });
+  syncHapusToggle();
+
+  $('#pills').addEventListener('click', (e) => {
+    const chip = e.target.closest('button[data-filter]');
+    if (!chip) return;
+    const category = chip.dataset.filter;
+    const wasActive = state.filters.kategori === category;
+    state.filters.kategori = wasActive ? 'SEMUA' : category;
+    state.filters.showHapus = !wasActive && category === 'HAPUS';
+    toggle.checked = state.filters.showHapus;
+    syncHapusToggle();
+    kategoriSelect.value = state.filters.kategori;
+    renderHero();
+    renderTable();
+  });
 
   const ukeBtn = $('#ukeBtn');
   ukeBtn.addEventListener('click', (e) => { e.stopPropagation(); $('#ukeMenu').classList.toggle('open'); });

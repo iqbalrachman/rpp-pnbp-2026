@@ -75,21 +75,89 @@ export function parseCSV(text) {
   return rows;
 }
 
-/* gviz JSON -> array-of-arrays, using the *formatted* value `f` when present.
- * This is the critical fix for scientific-notation numbers (ID_LAMA). */
+/* Extract cell text and hyperlink metadata without flattening gviz cells to strings. */
+function decodeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([\da-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+}
+
+function stripCellHtml(value) {
+  const source = String(value == null ? '' : value);
+  if (!/<(?:a|br|div|p|span)\b/i.test(source)) return source;
+  return decodeHtml(source
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|li)\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, ''));
+}
+
+function safeHref(value) {
+  const href = decodeHtml(String(value == null ? '' : value).trim());
+  return /^(https?:\/\/|mailto:)/i.test(href) ? href : '';
+}
+
+function extractCellLinks(value) {
+  const source = String(value == null ? '' : value);
+  const links = [];
+  const add = (href, label = '') => {
+    const safe = safeHref(href);
+    if (safe && !links.some((link) => link.href === safe)) links.push({ href: safe, label: stripCellHtml(label) || safe });
+  };
+  const anchors = /<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a\s*>/gi;
+  let match;
+  while ((match = anchors.exec(source))) add(match[2], match[3]);
+  const urls = source.match(/https?:\/\/[^\s<>"']+/gi) || [];
+  urls.forEach((url) => add(url.replace(/[),.;!?]+$/, ''), url.replace(/[),.;!?]+$/, '')));
+  return links;
+}
+
+function linksFromMetadata(meta) {
+  const links = [];
+  const visit = (value, key = '', depth = 0) => {
+    if (depth > 6 || value == null) return;
+    if (typeof value === 'string') {
+      if (/href|url|link|hyperlink|target/i.test(key)) {
+        const direct = safeHref(value);
+        if (direct) links.push({ href: direct, label: direct });
+      }
+      for (const link of extractCellLinks(value)) links.push(link);
+      return;
+    }
+    if (Array.isArray(value)) { value.forEach((item) => visit(item, key, depth + 1)); return; }
+    if (typeof value === 'object') {
+      Object.entries(value).forEach(([childKey, child]) => visit(child, childKey, depth + 1));
+    }
+  };
+  visit(meta);
+  return links.filter((link, index) => links.findIndex((x) => x.href === link.href) === index);
+}
+
+function makeGvizCell(cell) {
+  if (!cell) return { __sheetCell: true, text: '', links: [] };
+  const formatted = cell.f !== undefined && cell.f !== null && cell.f !== '' ? cell.f : cell.v;
+  const rawText = formatted === undefined || formatted === null ? '' : String(formatted);
+  const links = [
+    ...extractCellLinks(rawText),
+    ...extractCellLinks(cell.v),
+    ...linksFromMetadata(cell),
+  ].filter((link, index, all) => all.findIndex((item) => item.href === link.href) === index);
+  return { __sheetCell: true, text: stripCellHtml(rawText), links };
+}
+
+/* gviz JSON -> rows, preserving both formatted text and any exposed cell links. */
 export function gvizToRows(json) {
-  const rows = (json && json.table && json.table.rows) || [];
-  return rows.map((r) => (r.c || []).map((c) => {
-    if (!c) return '';
-    if (c.f !== undefined && c.f !== null && c.f !== '') return String(c.f);
-    if (c.v === undefined || c.v === null) return '';
-    return String(c.v);
-  }));
+  const table = (json && json.table) || {};
+  const rows = table.rows || [];
+  const values = rows.map((row) => (row.c || []).map(makeGvizCell));
+  const headers = (table.cols || []).map((column) => String((column && (column.label || column.id)) || ''));
+  return headers.some(Boolean) ? [headers, ...values] : values;
 }
 
 /* ---------------------------------------------------------------------------
- * Column indices — identical for the gviz feed and the published CSV
- * (both carry a leading blank column A).
+ * Positional fallback for sources that do not provide column headers.
+ * When headers exist, normRpp resolves columns by their names first.
  * -------------------------------------------------------------------------*/
 export const DD = {
   NO: 1, ID_LAMA: 2, ID_BARU: 3, UKE: 4, KATEGORI: 5, JENIS: 6, SUBJENIS: 7,
@@ -100,6 +168,91 @@ export const DD = {
 
 const KATEGORI_SET = new Set(['BARU', 'UBAH', 'TETAP', 'HAPUS']);
 
+const RPP_HEADER_ALIASES = {
+  NO: ['NO', 'NOMOR'],
+  ID_LAMA: ['IDLAMA'],
+  ID_BARU: ['IDBARU'],
+  UKE: ['UKEII', 'UKE2', 'UKE'],
+  KATEGORI: ['KATEGORI'],
+  JENIS: ['JENIS'],
+  SUBJENIS: ['SUBJENIS'],
+  NAMA: ['NAMALAYANAN', 'NAMA'],
+  DETIL: ['NAMADETILLAYANAN', 'NAMADETAILLAYANAN', 'DETILLAYANAN', 'DETAILLAYANAN', 'DETIL', 'DETAIL'],
+  SATUAN: ['SATUAN'],
+  TARIF: ['TARIF'],
+  OUTPUT: ['OUTPUTTIPEDATA', 'OUTPUT'],
+  HUKUM: ['DASARHUKUM', 'HUKUM'],
+  DESKRIPSI: ['DESKRIPSILAYANAN', 'DESKRIPSI'],
+  PENGGUNA: ['PENGGUNASAATINIDANATAUSASARANPENGGUNA', 'PENGGUNA'],
+  RATA3: ['RATARATAPERMINTAANLAYANAN', 'RATARATA', 'RATA3'],
+  PROYEKSI: ['PROYEKSI', 'PROYEKSIPEMINTAAN'],
+  PENDAPATAN: ['PENDAPATANDALAM3TAHUN', 'PENDAPATAN'],
+  BENCH: ['BENCHMARKINGLAYANAN', 'BENCHMARKING', 'BENCH'],
+  LINK: ['LINKSURAT', 'LINK'],
+};
+
+const normalizeHeader = (value) => String(value == null ? '' : value)
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const REQUIRED_RPP_COLUMNS = Object.keys(DD).filter((field) => field !== 'NO');
+
+function headerText(value) {
+  return value && typeof value === 'object' && value.__sheetCell === true
+    ? value.text : String(value == null ? '' : value);
+}
+
+function findHeaderIndex(headers, field, aliases) {
+  const matches = [];
+  headers.forEach((header, index) => {
+    const value = normalizeHeader(headerText(header));
+    if (!value || (field === 'NAMA' && /DETIL|DETAIL/.test(value))) return;
+    let score = -1;
+    for (const alias of aliases) {
+      if (value === alias) score = Math.max(score, 1000 + alias.length);
+      else if (value.startsWith(alias)) score = Math.max(score, alias.length);
+    }
+    if (score >= 0) matches.push({ index, score });
+  });
+  if (!matches.length) return -1;
+  const bestScore = Math.max(...matches.map((match) => match.score));
+  const best = matches.filter((match) => match.score === bestScore);
+  if (best.length > 1) throw new Error(`Header RPP ambigu untuk kolom ${field}`);
+  return best[0].index;
+}
+
+function resolveRppColumns(rows) {
+  const limit = Math.min(rows.length, 25);
+  for (let rowIndex = 0; rowIndex < limit; rowIndex++) {
+    const headers = rows[rowIndex] || [];
+    const headerValues = headers.map((header) => normalizeHeader(headerText(header)));
+    const hasCategory = headerValues.some((value) => value === 'KATEGORI' || value.startsWith('KATEGORI'));
+    const hasAnyId = headerValues.some((value) => value === 'IDBARU' || value === 'IDLAMA' || value.startsWith('IDBARU') || value.startsWith('IDLAMA'));
+    if (!hasCategory || !hasAnyId) continue;
+
+    const columns = Object.fromEntries(Object.entries(RPP_HEADER_ALIASES).map(([field, aliases]) => [
+      field, findHeaderIndex(headers, field, aliases),
+    ]));
+    const missing = REQUIRED_RPP_COLUMNS.filter((field) => columns[field] < 0);
+    if (missing.length) throw new Error(`Header RPP tidak lengkap: ${missing.join(', ')}`);
+    const used = new Map();
+    for (const field of REQUIRED_RPP_COLUMNS) {
+      const index = columns[field];
+      if (used.has(index)) throw new Error(`Header RPP ${field} bertabrakan dengan ${used.get(index)}`);
+      used.set(index, field);
+    }
+    return { columns: { NO: findHeaderIndex(headers, 'NO', RPP_HEADER_ALIASES.NO), ...columns }, headerRow: rowIndex, mode: 'header' };
+  }
+
+  // Positional fallback is only used when the feed provides no recognizable header row.
+  // Require the complete expected width so a short/partial feed is never accepted as a full row.
+  const requiredWidth = Math.max(...Object.values(DD)) + 1;
+  if (!rows.some((row) => Array.isArray(row) && row.length >= requiredWidth)) {
+    throw new Error(`Feed tanpa header hanya memiliki ${Math.max(0, ...rows.map((row) => row?.length || 0))} kolom; perlu minimal ${requiredWidth}`);
+  }
+  return { columns: { ...DD }, headerRow: -1, mode: 'positional' };
+}
+
 /* Normalize an old-service id. The source has real quirks:
  *   "0"           -> sentinel used on BARU rows (means "none")
  *   "120180047000156." -> stray trailing dot
@@ -109,41 +262,60 @@ export function normId(s) {
   const v = String(s == null ? '' : s).trim().replace(/\.$/, '');
   return /^\d{6,}[A-Z]?$/.test(v) ? v : '';
 }
-const cell = (r, i) => String((r && r[i] != null ? r[i] : '')).replace(/\u00a0/g, ' ').trim();
 
-/* DATA_DUKUNG rows -> normalized RPP rows (154). Never invents a row. */
+function cellData(row, index) {
+  const source = row && index >= 0 ? row[index] : null;
+  if (source && typeof source === 'object' && source.__sheetCell === true) {
+    return {
+      text: String(source.text == null ? '' : source.text).replace(/\u00a0/g, ' '),
+      links: Array.isArray(source.links) ? source.links.map((link) => ({ ...link })) : [],
+      present: true,
+    };
+  }
+  const text = source == null ? '' : String(source).replace(/\u00a0/g, ' ');
+  return { text, links: extractCellLinks(text), present: !!row && index >= 0 && index < row.length };
+}
+const cell = (row, index) => cellData(row, index).text.trim();
+
+/* DATA_DUKUNG rows -> normalized RPP rows. Never invents or shortens field text. */
 export function normRpp(rows) {
   const out = [];
-  for (const r of rows) {
+  const { columns, headerRow } = resolveRppColumns(rows || []);
+  const detailFields = ['OUTPUT', 'HUKUM', 'DESKRIPSI', 'PENGGUNA', 'RATA3', 'PROYEKSI', 'PENDAPATAN', 'BENCH', 'LINK'];
+  for (let rowIndex = 0; rowIndex < (rows || []).length; rowIndex++) {
+    if (rowIndex === headerRow) continue;
+    const r = rows[rowIndex];
     if (!r) continue;
-    const kategori = cell(r, DD.KATEGORI).toUpperCase();
-    const idBaru = cell(r, DD.ID_BARU);
-    const idLama = normId(cell(r, DD.ID_LAMA));
-    // Header guard: skip the label row and any non-data rows.
+    const kategori = cell(r, columns.KATEGORI).toUpperCase();
+    const idBaru = cell(r, columns.ID_BARU);
+    const idLama = normId(cell(r, columns.ID_LAMA));
     if (!KATEGORI_SET.has(kategori)) continue;
     if (!/^\d+$/.test(idBaru) && !idLama) continue;
+
+    const raw = Object.fromEntries(detailFields.map((field) => [field, cellData(r, columns[field])]));
     out.push({
       type: 'rpp',
-      no: cell(r, DD.NO),
+      no: cell(r, columns.NO),
       idBaru: /^\d+$/.test(idBaru) ? Number(idBaru) : null,
       idLama,
       kategori,
-      uke: cell(r, DD.UKE),
-      jenis: cell(r, DD.JENIS),
-      subjenis: cell(r, DD.SUBJENIS),
-      nama: cell(r, DD.NAMA),
-      detil: cell(r, DD.DETIL),
-      satuan: cell(r, DD.SATUAN),
-      tarif: cell(r, DD.TARIF),
-      output: cell(r, DD.OUTPUT),
-      hukum: cell(r, DD.HUKUM),
-      deskripsi: cell(r, DD.DESKRIPSI),
-      pengguna: cell(r, DD.PENGGUNA),
-      rata3: cell(r, DD.RATA3),
-      proyeksi: cell(r, DD.PROYEKSI),
-      pendapatan: cell(r, DD.PENDAPATAN),
-      bench: cell(r, DD.BENCH),
-      link: cell(r, DD.LINK),
+      uke: cell(r, columns.UKE),
+      jenis: cell(r, columns.JENIS),
+      subjenis: cell(r, columns.SUBJENIS),
+      nama: cell(r, columns.NAMA),
+      detil: cell(r, columns.DETIL),
+      satuan: cell(r, columns.SATUAN),
+      tarif: cell(r, columns.TARIF),
+      output: raw.OUTPUT.text,
+      hukum: raw.HUKUM.text,
+      deskripsi: raw.DESKRIPSI.text,
+      pengguna: raw.PENGGUNA.text,
+      rata3: raw.RATA3.text,
+      proyeksi: raw.PROYEKSI.text,
+      pendapatan: raw.PENDAPATAN.text,
+      bench: raw.BENCH.text,
+      link: raw.LINK.text,
+      richCells: { hukum: raw.HUKUM, link: raw.LINK },
     });
   }
   return out;
@@ -178,7 +350,6 @@ export function normPP47(rows) {
     const tarifLama = cell(r, 6);
     const satuanLama = cell(r, 5);
     const namaE = cell(r, 4);
-    const namaParts = [cell(r, 1), cell(r, 2), cell(r, 3), namaE].filter(Boolean);
     const rec = {
       idLama,
       namaLama: cell(r, 4) || fillD || fillC || fillB || idLama,
@@ -187,8 +358,8 @@ export function normPP47(rows) {
       tarifLama,
       ukeLama: cell(r, 18),
       ket: cell(r, 19),
-      alasan: cell(r, 15),          // column P
-      penjelasan: cell(r, 23),      // column X
+      alasan: cellData(r, 15).text, // column P
+      penjelasan: cellData(r, 23).text, // column X
     };
     const isLeaf = !!(tarifLama || satuanLama);
     if (isLeaf) oldMap[idLama] = rec;
@@ -205,10 +376,13 @@ export function hierarchy(row) {
   const subjenis = row.subjenis || '';
   const nama = row.nama || '';
   const detil = row.detil || '';
-  if (detil) return { level: 4, leaf: detil, parents: [jenis, subjenis, nama].filter(Boolean) };
-  if (nama) return { level: 3, leaf: nama, parents: [jenis, subjenis].filter(Boolean) };
-  if (subjenis) return { level: 2, leaf: subjenis, parents: [jenis].filter(Boolean) };
-  return { level: 1, leaf: jenis || '—', parents: [] };
+  let level, leaf, parents;
+  if (detil) { level = 4; leaf = detil; parents = [jenis, subjenis, nama].filter(Boolean); }
+  else if (nama) { level = 3; leaf = nama; parents = [jenis, subjenis].filter(Boolean); }
+  else if (subjenis) { level = 2; leaf = subjenis; parents = [jenis].filter(Boolean); }
+  else { level = 1; leaf = jenis || '—'; parents = []; }
+  const bottomUp = [leaf, ...parents.slice().reverse()].filter((part) => part && part !== '—');
+  return { level, leaf, parents, bottomUp };
 }
 
 /* ---------------------------------------------------------------------------
@@ -268,23 +442,73 @@ export function resolveUke(list) {
   });
 }
 
-/* ---------------------------------------------------------------------------
- * Sorting (spec §5): default ID_BARU asc numeric;
- * when HAPUS is shown -> ID_LAMA asc as 15-digit string (BigInt-safe).
- * Rows without ID_LAMA keep their ID_BARU order, placed after.
- * -------------------------------------------------------------------------*/
-export function sortRows(list, showHapus) {
+/* Sort visible records by a selected field. Empty values stay at the end. */
+export function sortRows(list, showHapus, sortKey = 'id', direction = 'asc') {
   const arr = list.slice();
-  if (!showHapus) {
-    arr.sort((a, b) => (a.idBaru == null ? 1e9 : a.idBaru) - (b.idBaru == null ? 1e9 : b.idBaru));
-    return arr;
-  }
+  const dir = direction === 'desc' ? -1 : 1;
+  const text = (value) => String(value == null ? '' : value).trim();
+  const compareText = (a, b) => text(a).localeCompare(text(b), 'id', { numeric: true, sensitivity: 'base' });
+  const compareNullable = (a, b, compare) => {
+    const aEmpty = a == null || text(a) === '';
+    const bEmpty = b == null || text(b) === '';
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1;
+    if (bEmpty) return -1;
+    return compare(a, b) * dir;
+  };
+  const compareNewId = (a, b) => {
+    const aValue = a.idBaru, bValue = b.idBaru;
+    const aEmpty = aValue == null || text(aValue) === '';
+    const bEmpty = bValue == null || text(bValue) === '';
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1;
+    if (bEmpty) return -1;
+    const aNumber = Number(aValue), bNumber = Number(bValue);
+    const aNumeric = Number.isFinite(aNumber), bNumeric = Number.isFinite(bNumber);
+    if (aNumeric && bNumeric) return (aNumber - bNumber) * dir;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return compareText(aValue, bValue) * dir;
+  };
+
   arr.sort((a, b) => {
-    const al = a.idLama || '', bl = b.idLama || '';
-    if (al && bl) return al < bl ? -1 : al > bl ? 1 : 0;
-    if (al && !bl) return -1;
-    if (!al && bl) return 1;
-    return (a.idBaru == null ? 1e9 : a.idBaru) - (b.idBaru == null ? 1e9 : b.idBaru);
+    if (sortKey === 'id') {
+      if (showHapus) {
+        const oldA = a.idLama || '', oldB = b.idLama || '';
+        if (oldA && oldB) return compareText(oldA, oldB) * dir;
+        if (oldA) return -1;
+        if (oldB) return 1;
+      }
+      return compareNewId(a, b);
+    }
+    if (sortKey === 'service') {
+      const path = (row) => {
+        if (row.type !== 'hapus') return [row.detil, row.nama, row.subjenis, row.jenis].filter(Boolean).join(' ');
+        const parents = [...(row.pathLama || [])];
+        if (parents.length && parents[parents.length - 1] === row.namaLama) parents.pop();
+        return [row.namaLama || '', ...parents.reverse()].filter(Boolean).join(' ');
+      };
+      return compareNullable(path(a), path(b), compareText);
+    }
+    if (sortKey === 'uke') return compareNullable(a._resolvedUke || a.uke || a.ukeLama, b._resolvedUke || b.uke || b.ukeLama, compareText);
+    if (sortKey === 'kategori') {
+      const order = { BARU: 0, UBAH: 1, TETAP: 2, HAPUS: 3 };
+      const ka = a.type === 'hapus' ? 'HAPUS' : (a.kategori || '');
+      const kb = b.type === 'hapus' ? 'HAPUS' : (b.kategori || '');
+      return compareNullable(ka, kb, (x, y) => (order[x] ?? 99) - (order[y] ?? 99));
+    }
+    if (sortKey === 'tarif') {
+      const getTarif = (row) => classifyTarif(row.type === 'hapus' ? row.tarifLama : row.tarif);
+      const ta = getTarif(a), tb = getTarif(b);
+      const rank = { rp: 0, percent: 1, other: 2, none: 3 };
+      if (ta.type !== tb.type) return rank[ta.type] - rank[tb.type];
+      if (ta.type === 'rp' || ta.type === 'percent') {
+        const aNumeric = Number.isFinite(ta.num), bNumeric = Number.isFinite(tb.num);
+        if (aNumeric && bNumeric) return (ta.num - tb.num) * dir;
+        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+      }
+      return compareNullable(ta.raw, tb.raw, compareText);
+    }
+    return 0;
   });
   return arr;
 }
@@ -305,12 +529,6 @@ export function computeStats(rpp, hapusList, semulaIds) {
     baru: c.BARU, ubah: c.UBAH, tetap: c.TETAP,
     hapus: hapusList.length,
     semula,
-  };
-  totals.pct = {
-    baru: totals.semula ? Math.round((totals.baru / totals.semula) * 100) : 0,
-    ubah: totals.semula ? Math.round((totals.ubah / totals.semula) * 100) : 0,
-    tetap: totals.semula ? Math.round((totals.tetap / totals.semula) * 100) : 0,
-    hapus: totals.semula ? Math.round((totals.hapus / totals.semula) * 100) : 0,
   };
   return totals;
 }

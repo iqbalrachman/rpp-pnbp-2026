@@ -1,0 +1,8 @@
+{
+  "name": "rpp-pnbp-bmkg-2026-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
