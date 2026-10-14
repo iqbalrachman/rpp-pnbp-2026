@@ -22,38 +22,60 @@ body{
 }
 code,.mono{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
 
-/* ---------------------------- hero ---------------------------- */
+/* ---------------------------- hero / infographic ---------------------------- */
 .hero{
-  position:sticky; top:0; z-index:40; min-height:56px;
-  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
-  padding:8px 20px; background:rgba(255,255,255,.82);
-  backdrop-filter:saturate(180%) blur(14px); -webkit-backdrop-filter:saturate(180%) blur(14px);
-  border-bottom:1px solid var(--slate-200); position:sticky;
+  display:grid; grid-template-columns:minmax(220px,.8fr) minmax(0,1.5fr); gap:16px 24px;
+  align-items:center; padding:20px 24px 16px; color:var(--slate-900);
+  background:radial-gradient(ellipse at 90% 0%,rgba(96,165,250,.2),transparent 42%),
+    linear-gradient(125deg,#f8fbff 0%,#edf5ff 58%,#f0fdfa 100%);
+  border-bottom:1px solid #dbeafe;
 }
-.hero h1{font-size:15px; font-weight:700; margin:0; letter-spacing:-.01em; white-space:nowrap}
-.hero h1 small{display:block; font-weight:500; font-size:11px; color:var(--slate-500); letter-spacing:0}
-.pills{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center}
-.pill{
-  display:inline-flex; align-items:baseline; gap:5px; padding:4px 9px; border-radius:999px;
-  background:var(--slate-100); color:var(--slate-500); font-size:10.5px; font-weight:600;
-  letter-spacing:.02em; white-space:nowrap;
+.hero-heading{min-width:0}
+.hero-kicker{display:block; margin-bottom:6px; color:#1d4ed8; font-size:10px; font-weight:700; letter-spacing:.13em; text-transform:uppercase}
+.hero h1{font-size:22px; font-weight:750; margin:0; letter-spacing:-.035em; color:#0f172a}
+.hero-heading > small{display:block; margin-top:7px; color:#64748b; font-size:11px; line-height:1.5}
+.hero-overview{display:grid; grid-template-columns:minmax(95px,.65fr) minmax(95px,.65fr) minmax(210px,1.7fr); align-items:stretch; gap:10px}
+.hero-total,.hero-chart{min-height:82px; padding:11px 13px; border:1px solid #dbeafe; border-radius:12px; background:rgba(255,255,255,.8); box-shadow:0 8px 22px rgba(30,64,175,.045)}
+.hero-total{display:flex; flex-direction:column; justify-content:center; gap:3px}
+.hero-total span{color:#64748b; font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase}
+.hero-total strong{font-size:24px; line-height:1; font-variant-numeric:tabular-nums; color:#0f172a}
+.hero-total small{color:#64748b; font-size:10px}
+.hero-total-new{background:#eff6ff}
+.hero-chart{display:flex; flex-direction:column; justify-content:center; gap:8px}
+.chart-head{display:flex; justify-content:space-between; gap:8px; color:#334155; font-size:10px; font-weight:600}
+#progress{height:10px; display:flex; overflow:hidden; border-radius:999px; background:#e2e8f0}
+.seg{height:100%; min-width:0; transition:width .25s ease}
+.seg-green{background:#22c55e} .seg-amber{background:#f59e0b}
+.seg-blue{background:#3b82f6} .seg-red{background:#ef4444}
+.chart-legend{display:flex; flex-wrap:wrap; gap:4px 10px; color:#64748b; font-size:9px}
+.chart-legend span{white-space:nowrap}
+.chart-legend b{color:#0f172a; font-variant-numeric:tabular-nums}
+.pills{grid-column:1/-1; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px}
+.filter-chip{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0;
+  padding:9px 12px; border:1px solid #dbe5f1; border-radius:11px;
+  color:#334155; background:rgba(255,255,255,.82); font:inherit; text-align:left; cursor:pointer;
+  box-shadow:0 3px 10px rgba(15,23,42,.035);
+  transition:transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
 }
-.pill b{font-size:13px; color:var(--slate-900); font-weight:700}
-.pill-total{background:var(--slate-900)} .pill-total b,.pill-total{color:#fff}
-.pill-green{background:var(--green-bg)} .pill-green b{color:var(--green)}
-.pill-amber{background:var(--amber-bg)} .pill-amber b{color:var(--amber)}
-.pill-blue{background:var(--blue-bg)} .pill-blue b{color:var(--blue)}
-.pill-red{background:var(--red-bg)} .pill-red b{color:var(--red)}
-#progress{position:absolute; left:0; right:0; bottom:0; height:2px; display:flex; overflow:hidden}
-.seg{height:100%}
-.seg-green{background:var(--green)} .seg-amber{background:var(--amber)}
-.seg-blue{background:var(--blue)} .seg-red{background:var(--red)}
+.filter-chip:hover{transform:translateY(-1px); background:#fff; border-color:#93c5fd; box-shadow:0 6px 16px rgba(37,99,235,.09)}
+.filter-chip:focus-visible{outline:3px solid #60a5fa; outline-offset:2px}
+.filter-chip.active{background:#1d4ed8; color:#fff; border-color:#1d4ed8; box-shadow:0 5px 16px rgba(37,99,235,.2)}
+.chip-label{font-size:10px; font-weight:700; letter-spacing:.09em}
+.chip-value{display:flex; align-items:baseline; gap:7px}
+.chip-value b{font-size:19px; line-height:1; font-variant-numeric:tabular-nums}
+.chip-value small{font-size:9px; color:#64748b}
+.filter-chip.active .chip-value small{color:#dbeafe}
+.filter-chip[data-filter="BARU"]{border-left:3px solid #4ade80}
+.filter-chip[data-filter="UBAH"]{border-left:3px solid #fbbf24}
+.filter-chip[data-filter="TETAP"]{border-left:3px solid #60a5fa}
+.filter-chip[data-filter="HAPUS"]{border-left:3px solid #f87171}
 
 /* ---------------------------- toolbar ---------------------------- */
 .toolbar{
   display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   padding:10px 20px; border-bottom:1px solid var(--slate-100); background:#fff;
-  position:sticky; top:56px; z-index:20;
+  position:sticky; top:0; z-index:40;
 }
 .search{position:relative; flex:1 1 260px; min-width:200px}
 .search input{
@@ -66,6 +88,12 @@ select.ctl{
   padding:7px 10px; border:1px solid var(--slate-200); border-radius:8px; background:var(--slate-50);
   font:inherit; font-size:12.5px; outline:none; cursor:pointer;
 }
+.sort-controls{display:inline-flex; align-items:center; gap:5px}
+.sort-control{display:inline-flex; align-items:center; gap:6px; color:var(--slate-500); font-size:11px; font-weight:600; white-space:nowrap}
+.sort-control select.ctl{max-width:145px}
+.sort-direction{width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--slate-200); border-radius:8px; background:var(--slate-50); color:var(--slate-700); font-size:16px; cursor:pointer}
+.sort-direction:hover{background:#fff; border-color:var(--slate-300)}
+.sort-direction:focus-visible{outline:3px solid var(--blue-bg); border-color:var(--blue)}
 .wrap{position:relative}
 .btn-uke{
   padding:7px 11px; border:1px solid var(--slate-200); border-radius:8px; background:var(--slate-50);
@@ -106,42 +134,54 @@ select.ctl{
   font-size:12px; border-left:3px solid var(--amber)}
 
 /* ---------------------------- table ---------------------------- */
-.tablewrap{padding:0 20px 40px}
-table{width:100%; border-collapse:collapse; table-layout:fixed}
+.tablewrap{padding:0 20px 40px; overflow-x:auto}
+table{width:100%; min-width:820px; border-collapse:collapse; table-layout:fixed}
 thead th{
-  position:sticky; top:107px; z-index:10; background:rgba(255,255,255,.94); backdrop-filter:blur(8px);
-  text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.05em; color:var(--slate-400);
-  text-transform:uppercase; padding:10px 10px; border-bottom:1px solid var(--slate-200);
+  position:sticky; top:57px; z-index:10; background:rgba(255,255,255,.96); backdrop-filter:blur(8px);
+  text-align:left; font-size:10px; font-weight:700; letter-spacing:.05em; color:var(--slate-500);
+  text-transform:uppercase; padding:9px 10px; border-bottom:1px solid var(--slate-200);
 }
-th.c-id{width:172px} th.c-uke{width:98px} th.c-kat{width:88px} th.c-tarif{width:210px} th.c-act{width:64px; text-align:center}
+th.c-id{width:198px} th.c-uke{width:124px} th.c-tarif{width:204px} th.c-act{width:58px; text-align:center}
+th[data-sort][aria-sort="ascending"],th[data-sort][aria-sort="descending"]{color:#1d4ed8}
+.sort-heading{display:inline-flex; align-items:center; gap:6px; padding:0; border:0; background:none; color:inherit; font:inherit; letter-spacing:inherit; text-transform:inherit; cursor:pointer}
+.sort-heading:hover{color:#1d4ed8}
+.sort-heading:focus-visible{outline:2px solid #60a5fa; outline-offset:3px; border-radius:3px}
+.sort-mark{color:#94a3b8; font-size:11px}
+[aria-sort="ascending"] .sort-mark,[aria-sort="descending"] .sort-mark{color:#1d4ed8}
 tbody tr{height:40px; border-bottom:1px solid var(--slate-100)}
+tbody tr.row-group-start td{border-top:1px solid #e2e8f0}
 tbody tr:hover{background:var(--slate-50)}
 tbody td{padding:6px 10px; vertical-align:middle}
 .center{text-align:center} .muted{color:var(--slate-400); padding:40px 0}
 
-/* id cell */
+/* compact ID and category cell */
 .td-id{font-variant-numeric:tabular-nums}
-.idcol{line-height:1.15}
-.idbaru{font-size:12px; font-weight:700; color:var(--slate-900)}
-.idlama{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--slate-400); white-space:nowrap}
-.id-hapus{font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--red); text-decoration:line-through}
+.idcol{line-height:1.15; min-width:0}
+.idline{display:flex; align-items:center; flex-wrap:wrap; gap:5px}
+.idbaru{font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; color:var(--slate-900); white-space:nowrap}
+.idlama{display:block; padding-top:3px; font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--slate-400); white-space:nowrap}
+.id-hapus{color:var(--red); text-decoration:line-through}
+.idline .badge{padding:2px 6px; font-size:8px}
 
-/* hierarchy cell */
+/* compact, grouped service hierarchy */
 .td-hier{overflow:hidden}
-.hier{display:flex; flex-wrap:wrap; align-items:baseline; gap:2px; line-height:1.28}
-.icon{font-size:12px; margin-right:3px; flex:none}
-.parents{font-size:11px; color:var(--slate-400); font-weight:400}
+.hier{display:grid; grid-template-columns:15px minmax(0,1fr); align-items:start; column-gap:5px; line-height:1.28; min-width:0}
+.icon{grid-column:1; grid-row:1 / span 2; font-size:12px; margin-top:1px; text-align:center}
+.parents{grid-column:2; grid-row:2; color:var(--slate-500); font-size:10px; font-weight:500; line-height:1.3; overflow-wrap:anywhere}
 .parents i{color:var(--slate-300); font-style:normal; margin:0 3px}
-.leaf{font-size:13px; font-weight:700; color:#000}
+.leaf{grid-column:2; grid-row:1; font-size:12px; font-weight:650; color:#111827; line-height:1.35; overflow-wrap:anywhere}
 .leaf-hapus{text-decoration:line-through; color:var(--slate-500)}
 
-/* uke pill */
+/* deterministic UKE II colors: each label keeps its hue when filtering/sorting */
 .ukepill{
-  display:inline-block; padding:3px 9px; border-radius:10px; font-size:10px; font-weight:600;
-  background:var(--slate-900); color:#fff; letter-spacing:.03em; white-space:nowrap;
+  display:inline-block; padding:4px 8px; border:1px solid hsl(var(--uke-hue,220) 62% 76%); border-radius:999px; font-size:9.5px; font-weight:700;
+  background:hsl(var(--uke-hue,220) 78% 92%); color:hsl(var(--uke-hue,220) 68% 27%); letter-spacing:.015em; white-space:nowrap;
 }
-.uke-inherited{background:var(--slate-300); color:var(--slate-700); font-style:italic; opacity:.6}
+.uke-inherited{background:hsl(var(--uke-hue,220) 82% 97%); color:hsl(var(--uke-hue,220) 55% 31%); border:1px dashed hsl(var(--uke-hue,220) 50% 75%); font-style:italic}
 .uke-empty{color:var(--slate-300)}
+.chk{--uke-hue:220}
+.uke-swatch{width:9px; height:9px; flex:none; border-radius:50%; background:hsl(var(--uke-hue) 66% 42%); box-shadow:0 0 0 2px hsl(var(--uke-hue) 70% 94%)}
+.uke-name{min-width:0; overflow-wrap:anywhere}
 
 /* badges */
 .badge{display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:.03em}
@@ -157,9 +197,9 @@ tbody td{padding:6px 10px; vertical-align:middle}
 .t-green{color:var(--green)} .t-amber{color:var(--amber)} .t-blue{color:var(--blue)} .t-red{color:var(--red)}
 .t-old{color:var(--slate-300); font-weight:600}
 .arrow{color:var(--slate-300)}
-.chip{display:inline-block; padding:1px 6px; border-radius:5px; font-size:9.5px; font-weight:600; background:var(--slate-100); color:var(--slate-500)}
-.chip-up{background:var(--red-bg); color:var(--red)}
-.chip-down{background:var(--green-bg); color:var(--green)}
+.chip{display:inline-block; padding:2px 7px; border-radius:6px; font-size:9px; font-weight:700; background:var(--slate-100); color:var(--slate-500); white-space:nowrap}
+.chip-change-small{background:#dcfce7; color:#15803d; border:1px solid #bbf7d0}
+.chip-change-large{background:#fff7ed; color:#c2410c; border:1px solid #fed7aa}
 
 /* action */
 .td-act{text-align:center}
@@ -193,8 +233,12 @@ tbody td{padding:6px 10px; vertical-align:middle}
 .drawer .close:hover{background:var(--slate-200)}
 .drawer .body{padding:16px 18px 40px; overflow:auto}
 .field{padding:10px 0; border-bottom:1px dashed var(--slate-100)}
-.flabel{font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--slate-400); margin-bottom:5px}
-.fval{font-size:12.5px; color:var(--slate-700); white-space:pre-wrap; word-break:break-word; line-height:1.5}
+.flabel{font-size:10.5px; font-weight:700; letter-spacing:.02em; text-transform:none; color:var(--slate-500); margin-bottom:5px; line-height:1.45; overflow-wrap:anywhere}
+.fval{font-size:12.5px; color:var(--slate-700); white-space:pre-wrap; word-break:break-word; line-height:1.6}
+.source-links{display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:2px}
+.source-link{display:inline-flex; margin-top:5px; color:var(--blue); font-size:11.5px; font-weight:700; text-decoration:none; overflow-wrap:anywhere}
+.source-link:hover{text-decoration:underline}
+.link-unavailable{margin-top:6px; color:#a16207; font-size:10.5px; font-style:italic}
 .fval.mono{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--slate-900)}
 .fval .empty{color:var(--slate-300)}
 .warn{background:var(--amber-bg); color:#92400e; padding:10px 12px; border-radius:8px; font-size:11.5px; margin-bottom:12px}
@@ -217,14 +261,49 @@ tbody td{padding:6px 10px; vertical-align:middle}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .link{border:0; background:none; color:var(--blue); font:inherit; cursor:pointer; text-decoration:underline; padding:0}
 #count{color:var(--slate-400)}
-@media (max-width:720px){ .pills{width:100%; margin-left:0} thead th{top:auto} .tablewrap{padding:0 8px 40px} .hero,.toolbar{padding-left:10px; padding-right:10px} }
+@media (max-width:1020px){
+  .hero{grid-template-columns:1fr; gap:14px}
+  .hero-overview{grid-template-columns:minmax(100px,.6fr) minmax(100px,.6fr) minmax(210px,1.8fr)}
+}
+@media (max-width:1120px){thead th{position:static}}
+@media (max-width:720px){
+  .hero{padding:17px 10px 14px}
+  .hero h1{font-size:20px}
+  .hero-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hero-chart{grid-column:1/-1}
+  .pills{grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px}
+  .filter-chip{padding:8px 9px}
+  .toolbar{padding-left:10px; padding-right:10px}
+  thead th{top:auto}
+  .tablewrap{padding:0 8px 40px}
+}
 </style>
 </head>
 <body>
 <header class="hero">
-  <h1>RPP PNBP BMKG 2026 <small>Lampiran PP 47/2018 (184 layanan) dibandingkan RPP 2026 (154 layanan)</small></h1>
-  <div class="pills" id="pills"></div>
-  <div id="progress"></div>
+  <div class="hero-heading">
+    <span class="hero-kicker">Dashboard perubahan tarif dan layanan</span>
+    <h1>RPP PNBP BMKG 2026</h1>
+    <small id="datasetSummary">Memuat ringkasan data…</small>
+  </div>
+  <div class="hero-overview">
+    <div class="hero-total">
+      <span>PP 47/2018</span>
+      <strong id="semulaCount">—</strong>
+      <small>layanan semula</small>
+    </div>
+    <div class="hero-total hero-total-new">
+      <span>RPP 2026</span>
+      <strong id="rppCount">—</strong>
+      <small>layanan usulan</small>
+    </div>
+    <div class="hero-chart">
+      <div class="chart-head"><span>Komposisi perubahan</span><span id="chartTotal">—</span></div>
+      <div id="progress" role="img" aria-label="Komposisi kategori perubahan"></div>
+      <div class="chart-legend" id="chartLegend"></div>
+    </div>
+  </div>
+  <div class="pills" id="pills" aria-label="Filter kategori"></div>
 </header>
 
 <div class="toolbar">
@@ -232,6 +311,18 @@ tbody td{padding:6px 10px; vertical-align:middle}
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <input id="search" type="search" placeholder="Cari 4 kolom hirarki: jenis, subjenis, layanan, detil…" autocomplete="off">
   </label>
+  <div class="sort-controls" aria-label="Pengurutan tabel">
+    <label class="sort-control"><span>Urut</span>
+      <select class="ctl" id="sortBy" aria-label="Urutkan berdasarkan">
+        <option value="id">ID</option>
+        <option value="service">Layanan</option>
+        <option value="uke">UKE II</option>
+        <option value="kategori">Kategori</option>
+        <option value="tarif">Tarif</option>
+      </select>
+    </label>
+    <button class="sort-direction" id="sortDirection" type="button" aria-label="Urut menaik" title="Urut menaik">↑</button>
+  </div>
   <div class="wrap" id="ukeWrap">
     <button class="btn-uke" id="ukeBtn">UKE II (semua)</button>
     <div class="menu" id="ukeMenu">
@@ -244,6 +335,7 @@ tbody td{padding:6px 10px; vertical-align:middle}
     <option value="BARU">BARU</option>
     <option value="UBAH">UBAH</option>
     <option value="TETAP">TETAP</option>
+    <option value="HAPUS">HAPUS</option>
   </select>
   <label class="toggle-wrap" id="hapusWrap">
     <span class="lbl">DIHAPUS</span>
@@ -256,17 +348,16 @@ tbody td{padding:6px 10px; vertical-align:middle}
 <div id="notice" class="notice" hidden></div>
 
 <div class="tablewrap">
-  <table>
+  <table id="dataTable">
     <colgroup>
-      <col style="width:172px"><col><col style="width:98px"><col style="width:88px"><col style="width:210px"><col style="width:64px">
+      <col style="width:198px"><col><col style="width:124px"><col style="width:204px"><col style="width:58px">
     </colgroup>
-    <thead>
+    <thead id="tableHead">
       <tr>
-        <th class="c-id">ID</th>
-        <th>Layanan (hierarki bottom&#8209;up)</th>
-        <th class="c-uke">UKE II</th>
-        <th class="c-kat">Kategori</th>
-        <th class="c-tarif">Tarif</th>
+        <th class="c-id" data-sort="id" aria-sort="ascending"><button class="sort-heading" type="button" data-sort="id">ID / Kategori <span class="sort-mark" aria-hidden="true">↑</span></button></th>
+        <th data-sort="service" aria-sort="none"><button class="sort-heading" type="button" data-sort="service">Layanan <span class="sort-mark" aria-hidden="true">↕</span></button></th>
+        <th class="c-uke" data-sort="uke" aria-sort="none"><button class="sort-heading" type="button" data-sort="uke">UKE II <span class="sort-mark" aria-hidden="true">↕</span></button></th>
+        <th class="c-tarif" data-sort="tarif" aria-sort="none"><button class="sort-heading" type="button" data-sort="tarif">Tarif <span class="sort-mark" aria-hidden="true">↕</span></button></th>
         <th class="c-act">Aksi</th>
       </tr>
     </thead>
