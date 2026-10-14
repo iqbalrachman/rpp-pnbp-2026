@@ -193,13 +193,17 @@ function renderNotice() {
 
 /* ------------------------------- helpers -------------------------------- */
 function iconFor(row) {
-  const text = [row.jenis, row.subjenis, row.nama, row.detil, row.namaLama, row.pathLama && row.pathLama.join(' ')]
-    .filter(Boolean).join(' ').toLowerCase();
-  if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '\u2708\ufe0f';
-  if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '\ud83c\udf0a';
-  if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '\ud83c\udf0b';
-  if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '\ud83c\udf21\ufe0f';
-  return '\ud83c\udf24\ufe0f';
+  // Match the service's own name first, so a parent category does not decide the icon.
+  const pick = (text) => {
+    if (/penerbangan|navigasi|bandara|airnav|aviation/.test(text)) return '\u2708\ufe0f';
+    if (/maritim|laut|pelayaran|pelabuhan|pantai|samudra|ocean|iklim mar/.test(text)) return '\ud83c\udf0a';
+    if (/vulkan|gunung|letusan|kegempaan|gempa|seismik|seismolog|geofisika|tsunami/.test(text)) return '\ud83c\udf0b';
+    if (/suhu|temperatur|udara atas|rawinsonde|klimatologi|iklim/.test(text)) return '\ud83c\udf21\ufe0f';
+    return null;
+  };
+  const own = [row.detil, row.nama, row.namaLama].filter(Boolean).join(' ').toLowerCase();
+  const parent = [row.subjenis, row.jenis, ...(row.pathLama || [])].filter(Boolean).join(' ').toLowerCase();
+  return pick(own) || pick(parent) || '\ud83c\udf24\ufe0f';
 }
 
 function katBadge(kat) {
@@ -304,7 +308,7 @@ function tarifCell(row) {
   const nt = classifyTarif(row.tarif);
   const newTxt = fmtTarif(nt) || '—';
   if (row.kategori === 'BARU') {
-    return `<div class="tarif"><span class="t-old">—</span><span class="arrow">&rarr;</span>` +
+    return `<div class="tarif">` +
       `<b class="t-green">${esc(newTxt)}</b>` +
       (row.satuan ? `<span class="satuan">${esc(row.satuan)}</span>` : '') + `</div>`;
   }
@@ -351,12 +355,12 @@ function hierCell(row, visibleParents, sharedParentCount) {
   const icon = `<span class="icon" aria-hidden="true">${iconFor(row)}</span>`;
   const parts = hierarchyParts(row);
   const leafClass = row.type === 'hapus' ? 'leaf leaf-hapus' : 'leaf';
-  const fullPath = [parts.primary, ...parts.parents.slice().reverse()].filter(Boolean).join(' › ');
-  const displayedParents = visibleParents.slice().reverse();
-  const parentHtml = displayedParents.length
-    ? `<span class="parents" style="padding-left:${Math.min(sharedParentCount * 8, 24)}px">${displayedParents.map((p) => esc(p)).join(' <i>›</i> ')}</span>` : '';
+  // Top-down: parents (Jenis › Subjenis › Nama) above, the service itself below in bold.
+  const fullPath = [...parts.parents, parts.primary].filter(Boolean).join(' › ');
+  const parentHtml = visibleParents.length
+    ? `<span class="parents" style="padding-left:${Math.min(sharedParentCount * 8, 24)}px">${visibleParents.map((p) => esc(p)).join(' <i>›</i> ')}</span>` : '';
   return `<div class="hier" title="${esc(fullPath)}" aria-label="${esc(fullPath)}">${icon}` +
-    `<span class="${leafClass}">${esc(parts.primary)}</span>${parentHtml}</div>`;
+    `${parentHtml}<span class="${leafClass}">${esc(parts.primary)}</span></div>`;
 }
 
 function rowHtml(item, visibleParents, sharedParentCount, isGroupStart) {
@@ -451,7 +455,7 @@ function openDrawer(kind, row) {
       ` &middot; UKE II <b>${esc(row.uke || '—')}</b> &middot; Tarif <b>${esc(tarifTxt)}</b></div>`;
     // Preserve the complete hierarchy and source text in the detail drawer.
     body.innerHTML =
-      field('Hierarki Layanan', h.bottomUp.join(' › ')) +
+      field('Hierarki Layanan', [...h.parents, h.leaf].filter((p) => p && p !== '—').join(' › ')) +
       field('Output/Tipe Data (Kolom J)', row.output) +
       fieldRich('Dasar Hukum (selain UU 31/2009 dan Perpres 20/2024)', row.richCells && row.richCells.hukum) +
       field('Deskripsi Layanan dan Parameter Layanan', row.deskripsi) +
@@ -474,7 +478,7 @@ function openDrawer(kind, row) {
     const hPath = hierarchyParts(row);
     body.innerHTML =
       `<div class="warn">Data Penjelasan HAPUS diambil dari kolom P &amp; X sheet PP 47/2018 (gid 0) &mdash; tanpa data contoh.</div>` +
-      field('Hierarki Layanan', [hPath.primary, ...hPath.parents.slice().reverse()].filter(Boolean).join(' › ')) +
+      field('Hierarki Layanan', [...hPath.parents, hPath.primary].filter(Boolean).join(' › ')) +
       field('Kategori Penghapusan (kolom P)', row.alasan) +
       field('Penjelasan (kolom X)', row.penjelasan);
   }
@@ -649,4 +653,14 @@ function wire() {
 /* --------------------------------- boot --------------------------------- */
 wire();
 renderStatus();
+/* Keep the sticky table header directly under the toolbar, whatever its height. */
+function syncToolbarHeight() {
+  const tb = document.querySelector('.toolbar');
+  if (!tb) return;
+  const set = () => document.documentElement.style.setProperty('--toolbar-h', tb.offsetHeight + 'px');
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(tb);
+  else window.addEventListener('resize', set);
+}
+syncToolbarHeight();
 loadAll();
