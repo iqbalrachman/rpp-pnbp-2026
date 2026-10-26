@@ -1,0 +1,3333 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pembayaran PNBP BMKG — Dashboard</title>
+<meta name="description" content="Dashboard pembayaran PNBP BMKG: tren setoran, kinerja satker, layanan, wajib bayar, anomali, dan kualitas data.">
+
+<!-- ============================================================
+     Satu file HTML. Bisa dijalankan di 3 tempat:
+     1) Google Apps Script (Web App /exec)  -> otomatis pakai google.script.run
+     2) GitHub Pages / hosting statis       -> pakai JSONP ke /exec (lihat APP_CONFIG)
+     3) Tanpa backend                       -> snapshot lokal / data demo
+     ============================================================ -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Konfigurasi Tailwind (harus setelah CDN)
+  window.tailwind && (tailwind.config = {
+    theme: { extend: {
+      colors: { brand: '#0000CD', leaf: '#228B22', ink: '#111827' },
+      fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+    } },
+  });
+</script>
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+<style>
+  :root {
+    --brand: #0000CD;
+    --leaf: #228B22;
+    --surface: #f3f4f6;
+  }
+  * { -webkit-tap-highlight-color: transparent; }
+  html { scroll-behavior: smooth; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+
+  /* --------------------------- Layout --------------------------- */
+  .sidebar { background-color: #111827; }
+  .main-content { background-color: var(--surface); }
+
+  /* Menu kiri dengan efek cekung (inverted radius) */
+  .menu-item {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 0;
+    color: #9ca3af;
+    transition: color .2s, background-color .2s;
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+  }
+  .menu-item:hover:not(.active) { color: #fff; }
+  .menu-item:focus-visible { outline: 2px solid #93c5fd; outline-offset: -4px; }
+  .menu-item.active {
+    background-color: var(--surface);
+    color: var(--brand);
+    border-radius: 24px 0 0 24px;
+    z-index: 10;
+  }
+  .menu-item.active::before,
+  .menu-item.active::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    background-color: transparent;
+    pointer-events: none;
+  }
+  .menu-item.active::before {
+    top: -24px;
+    border-bottom-right-radius: 24px;
+    box-shadow: 10px 10px 0 10px var(--surface);
+  }
+  .menu-item.active::after {
+    bottom: -24px;
+    border-top-right-radius: 24px;
+    box-shadow: 10px -10px 0 10px var(--surface);
+  }
+
+  /* --------------------------- Scrollbar --------------------------- */
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  /* --------------------------- Loader --------------------------- */
+  .loader-overlay {
+    position: fixed; inset: 0;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(3px);
+    z-index: 90;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    transition: opacity .3s ease;
+    padding: 24px;
+  }
+  .spinner {
+    width: 42px; height: 42px;
+    border: 4px solid #e5e7eb;
+    border-top-color: var(--brand);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* --------------------------- Tabel --------------------------- */
+  table.fixed { table-layout: fixed; width: 100%; }
+  .truncate-cell {
+    display: block; width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* --------------------------- Lain-lain --------------------------- */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  }
+  .chip-idr { background: #dcfce7; color: #166534; }
+  .chip-usd { background: #dbeafe; color: #1e40af; }
+  .chip-warn { background: #fef3c7; color: #92400e; }
+  .chip-bad { background: #fee2e2; color: #991b1b; }
+  .chip-ok { background: #dcfce7; color: #166534; }
+  .chip-muted { background: #f1f5f9; color: #475569; }
+
+  .card { background: #fff; border: 1px solid #f1f5f9; border-radius: .75rem; box-shadow: 0 1px 3px rgba(15,23,42,.04); }
+  .card-pad { padding: 1.25rem; }
+
+  .src-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  .toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 95;
+    max-width: 360px;
+    transform: translateY(20px); opacity: 0; pointer-events: none;
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+
+  dialog::backdrop { background: rgba(15,23,42,.45); }
+
+  @media print {
+    aside, header .no-print, .toast { display: none !important; }
+    main { overflow: visible !important; height: auto !important; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+
+<body class="flex w-full h-screen overflow-hidden text-gray-800 bg-gray-100">
+
+<!-- ====================== GLOBAL LOADER ====================== -->
+<div id="global-loader" class="loader-overlay">
+  <div class="spinner mb-4"></div>
+  <h2 class="text-lg font-semibold text-gray-800" id="loader-title">Menyiapkan dashboard…</h2>
+  <p class="text-sm text-gray-500 text-center max-w-sm mt-1" id="loader-text">Menghubungi sumber data</p>
+</div>
+
+<!-- ====================== 1. SIDEBAR KIRI ====================== -->
+<aside class="sidebar w-20 xl:w-24 hidden md:flex flex-col items-center py-6 shadow-xl z-20 flex-shrink-0">
+  <div class="w-11 h-11 bg-gradient-to-br from-[#228B22] to-[#0000CD] rounded-xl flex items-center justify-center mb-8 shadow-lg text-white font-extrabold text-lg select-none" title="PNBP BMKG">
+    P
+  </div>
+
+  <nav class="flex flex-col w-full gap-1.5 pl-3" id="sidebar-nav" aria-label="Navigasi bagian">
+    <button class="menu-item active" data-target="section-overview" title="Ringkasan" aria-label="Ringkasan">
+      <i class="ph ph-squares-four text-2xl"></i>
+    </button>
+    <button class="menu-item" data-target="section-satker" title="Satker / Unit" aria-label="Satker / Unit">
+      <i class="ph ph-buildings text-2xl"></i>
+    </button>
+    <button class="menu-item" data-target="section-layanan" title="Layanan / NTPN" aria-label="Layanan / NTPN">
+      <i class="ph ph-barcode text-2xl"></i>
+    </button>
+    <button class="menu-item" data-target="section-payer" title="Wajib Bayar" aria-label="Wajib Bayar">
+      <i class="ph ph-users-three text-2xl"></i>
+    </button>
+    <button class="menu-item" data-target="section-quality" title="Kualitas Data" aria-label="Kualitas Data">
+      <i class="ph ph-shield-check text-2xl"></i>
+    </button>
+  </nav>
+
+  <div class="mt-auto flex flex-col items-center gap-2 pt-4">
+    <button id="theme-print" class="text-gray-400 hover:text-white transition p-2" title="Cetak / simpan PDF" aria-label="Cetak">
+      <i class="ph ph-printer text-xl"></i>
+    </button>
+    <button id="open-settings-rail" class="text-gray-400 hover:text-white transition p-2" title="Pengaturan sumber data" aria-label="Pengaturan sumber data">
+      <i class="ph ph-gear text-xl"></i>
+    </button>
+  </div>
+</aside>
+
+<!-- ====================== MAIN ====================== -->
+<main class="main-content flex-1 flex flex-col overflow-y-auto relative h-full" id="main-scroll-area">
+
+  <!-- Header -->
+  <header class="flex flex-wrap gap-4 justify-between items-center px-5 lg:px-8 py-5 sticky top-0 bg-[#f3f4f6]/90 backdrop-blur-md z-20 border-b border-gray-200">
+    <div class="min-w-0">
+      <h1 class="text-xl lg:text-2xl font-extrabold text-gray-900 tracking-tight">PEMBAYARAN PNBP</h1>
+      <p class="text-[11px] lg:text-sm text-gray-500">BADAN METEOROLOGI, KLIMATOLOGI, DAN GEOFISIKA</p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 lg:gap-3 no-print">
+      <div class="relative">
+        <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+        <input type="search" id="global-search" placeholder="Cari wajib bayar, satker, layanan…" autocomplete="off"
+          class="pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0000CD]/20 focus:border-[#0000CD] w-52 lg:w-72 shadow-sm transition-all">
+      </div>
+
+      <div class="flex bg-white rounded-lg p-1 border border-gray-200 shadow-sm" id="global-filter-container" role="group" aria-label="Periode agregasi">
+        <button class="filter-btn px-3 py-1 text-xs rounded-md font-semibold text-gray-600 hover:bg-gray-50 transition-colors" data-filter="Day">Hari</button>
+        <button class="filter-btn px-3 py-1 text-xs rounded-md font-semibold bg-[#0000CD]/10 text-[#0000CD] transition-colors" data-filter="Month">Bulan</button>
+        <button class="filter-btn px-3 py-1 text-xs rounded-md font-semibold text-gray-600 hover:bg-gray-50 transition-colors" data-filter="Year">Tahun</button>
+      </div>
+
+      <button id="refresh-btn" class="p-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-colors text-gray-700" title="Muat ulang data" aria-label="Muat ulang data">
+        <i class="ph ph-arrows-clockwise text-lg"></i>
+      </button>
+      <button id="toggle-sidebar" class="p-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-colors text-gray-700" title="Sembunyikan panel kanan" aria-label="Sembunyikan panel kanan">
+        <i class="ph ph-sidebar-simple text-lg"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="px-4 lg:px-8 pb-12 flex flex-col gap-6 mt-6">
+
+    <!-- ====================== RINGKASAN ====================== -->
+    <div id="section-overview" class="flex flex-col gap-6 scroll-mt-28">
+
+      <!-- Banner utama -->
+      <section class="w-full bg-gradient-to-r from-[#0000CD] to-[#228B22] rounded-2xl p-6 lg:p-8 text-white shadow-lg relative overflow-hidden">
+        <div class="absolute -right-10 -top-10 w-64 h-64 border-[40px] border-white/10 rounded-full pointer-events-none"></div>
+        <div class="absolute right-32 -bottom-20 w-48 h-48 border-[20px] border-white/5 rounded-full pointer-events-none"></div>
+
+        <div class="relative z-10 flex flex-col xl:flex-row xl:items-end justify-between gap-6">
+          <div>
+            <div class="flex items-center gap-2 text-white/80 mb-2">
+              <i class="ph-fill ph-lightning"></i>
+              <span class="text-xs font-bold uppercase tracking-wider">Total setoran periode terpilih</span>
+            </div>
+            <div class="flex flex-wrap items-end gap-x-6 gap-y-3">
+              <div>
+                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">IDR</p>
+                <h2 class="text-3xl lg:text-4xl font-extrabold leading-none num" id="insight-total-idr">Rp 0</h2>
+              </div>
+              <div class="hidden sm:block pb-1 text-white/40 text-2xl font-light">|</div>
+              <div>
+                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">USD</p>
+                <h2 class="text-2xl lg:text-3xl font-bold leading-none text-white/95 num" id="insight-total-usd">$ 0</h2>
+              </div>
+              <div class="hidden sm:block pb-1 text-white/40 text-2xl font-light">|</div>
+              <div>
+                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">Ekuivalen IDR</p>
+                <h2 class="text-xl lg:text-2xl font-bold leading-none text-white/90 num" id="insight-combined">Rp 0</h2>
+              </div>
+            </div>
+            <p class="text-[10px] text-white/60 mt-2" id="insight-fx-note">Kurs asumsi untuk ekuivalen IDR: —</p>
+          </div>
+
+          <div class="flex items-center gap-2 text-[11px] bg-white/10 border border-white/20 rounded-lg px-3 py-2 backdrop-blur-sm">
+            <span class="src-dot bg-emerald-300" id="insight-source-dot"></span>
+            <span id="insight-source">Menunggu data</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- KPI -->
+      <section class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        <div class="card card-pad relative overflow-hidden">
+          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+            Transaksi
+            <span class="p-1.5 bg-[#0000CD]/10 rounded-lg text-[#0000CD]"><i class="ph ph-receipt"></i></span>
+          </p>
+          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-tx">0</h3>
+          <p class="text-[11px] text-gray-400 mt-1" id="kpi-tx-note">—</p>
+        </div>
+
+        <div class="card card-pad relative overflow-hidden">
+          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+            Volume
+            <span class="p-1.5 bg-[#228B22]/10 rounded-lg text-[#228B22]"><i class="ph ph-stack"></i></span>
+          </p>
+          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-vol">0</h3>
+          <p class="text-[11px] text-gray-400 mt-1" id="kpi-vol-note">—</p>
+        </div>
+
+        <div class="card card-pad relative overflow-hidden">
+          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+            Rata-rata / transaksi
+            <span class="p-1.5 bg-gray-100 rounded-lg text-gray-500"><i class="ph ph-calculator"></i></span>
+          </p>
+          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-avg">0</h3>
+          <p class="text-[11px] text-gray-400 mt-1" id="kpi-avg-note">—</p>
+        </div>
+
+        <div class="card card-pad relative overflow-hidden">
+          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+            Wajib bayar unik
+            <span class="p-1.5 bg-purple-100 rounded-lg text-purple-700"><i class="ph ph-users-three"></i></span>
+          </p>
+          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-entities">0</h3>
+          <p class="text-[11px] text-gray-400 mt-1" id="kpi-entities-note">—</p>
+        </div>
+
+        <div class="card card-pad relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 text-white col-span-2 lg:col-span-1">
+          <p class="text-xs font-medium text-gray-400 flex items-center justify-between gap-2">
+            Satker aktif
+            <span class="p-1.5 bg-white/10 rounded-lg text-white"><i class="ph ph-buildings"></i></span>
+          </p>
+          <h3 class="text-2xl font-extrabold mt-1 num" id="kpi-satker">0</h3>
+          <p class="text-[11px] text-gray-400 mt-1" id="kpi-satker-note">—</p>
+        </div>
+      </section>
+
+      <!-- Forecast + Anomali -->
+      <section class="flex flex-col xl:flex-row gap-5">
+        <div class="card card-pad flex-[7] flex flex-col min-h-[340px]">
+          <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+            <h3 class="text-base font-bold text-gray-800 flex items-center gap-2">
+              <i class="ph-fill ph-trend-up text-[#0000CD]"></i> Proyeksi Setoran
+            </h3>
+            <span class="text-[10px] bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded font-bold flex items-center gap-1">
+              <i class="ph-fill ph-sparkle"></i> Regresi linear + interval prediksi
+            </span>
+          </div>
+          <div id="chart-forecast" class="flex-1 w-full min-h-[240px]"></div>
+          <p class="text-[11px] text-gray-500 mt-2" id="forecast-note">—</p>
+        </div>
+
+        <div class="card card-pad flex-[3] flex flex-col relative overflow-hidden min-h-[340px]">
+          <div class="absolute -right-4 -top-4 text-8xl text-red-50 opacity-70 pointer-events-none"><i class="ph-fill ph-warning-circle"></i></div>
+          <h3 class="text-base font-bold text-gray-800 flex items-center gap-2 mb-3 relative z-10">
+            <i class="ph-fill ph-warning-circle text-red-500"></i> Deteksi Anomali
+          </h3>
+          <div id="anomaly-list" class="relative z-10 flex-1 overflow-y-auto text-xs text-gray-600 space-y-2 pr-1">
+            <p class="text-gray-500">Memindai transaksi…</p>
+          </div>
+          <p class="text-[10px] text-gray-400 mt-2 relative z-10" id="anomaly-note">Ambang: |z| &gt; 3 per mata uang.</p>
+        </div>
+      </section>
+
+      <!-- Tren -->
+      <section class="flex flex-col lg:flex-row gap-5">
+        <div class="card card-pad flex-[7] flex flex-col min-h-[360px]">
+          <div class="flex justify-between items-center mb-3 gap-2">
+            <h3 class="text-base font-semibold text-gray-800">Tren Setoran &amp; Volume</h3>
+            <button id="trend-scale-btn" class="text-[10px] font-bold px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50" title="Ubah skala sumbu Y">Skala: Linear</button>
+          </div>
+          <div id="chart-trend" class="flex-1 w-full min-h-[280px]"></div>
+        </div>
+
+        <div class="card card-pad flex-[3] flex flex-col min-h-[360px]">
+          <h3 class="text-base font-semibold text-gray-800 mb-3">Kekuatan Satker</h3>
+          <div id="chart-top-satker" class="flex-1 w-full min-h-[260px]"></div>
+        </div>
+      </section>
+
+      <!-- Top entity + komposisi -->
+      <section class="flex flex-col lg:flex-row gap-5">
+        <div class="card card-pad flex-[3] flex flex-col h-[340px]">
+          <h3 class="text-base font-semibold text-gray-800 mb-2">Komposisi Kode Akun (IDR)</h3>
+          <div id="chart-akun" class="flex-1 w-full h-full"></div>
+        </div>
+
+        <div class="card card-pad flex-[3] flex flex-col h-[340px]">
+          <h3 class="text-base font-semibold text-gray-800 mb-2">Kumulatif Setoran (ekuivalen IDR)</h3>
+          <div id="chart-cumulative" class="flex-1 w-full h-full"></div>
+        </div>
+
+        <div class="card card-pad flex-[4] flex flex-col h-[340px]">
+          <h3 class="text-base font-semibold text-gray-800 mb-4">Penyumbang Terbesar</h3>
+          <div class="bg-[#f8fafc] rounded-xl p-5 flex-1 flex flex-col justify-center relative overflow-hidden border border-gray-100">
+            <div class="absolute right-0 top-0 text-8xl text-gray-200/60 -translate-y-4 translate-x-3 pointer-events-none"><i class="ph-fill ph-trophy"></i></div>
+            <div class="relative z-10">
+              <span class="chip chip-ok mb-3">#1 SETORAN TERBESAR</span>
+              <h4 class="text-lg font-extrabold text-gray-900 mb-1 truncate" id="top-entity-name" title="">—</h4>
+              <p class="text-xs text-gray-500 mb-4 truncate" id="top-entity-satker">—</p>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <p class="text-[11px] text-gray-500">Kontribusi IDR</p>
+                  <p class="text-base font-bold text-[#0000CD] num" id="top-entity-idr">Rp 0</p>
+                  <p class="text-[11px] text-gray-500 mt-2">Kontribusi USD</p>
+                  <p class="text-sm font-bold text-[#228B22] num" id="top-entity-usd">$ 0</p>
+                </div>
+                <div>
+                  <p class="text-[11px] text-gray-500">Transaksi</p>
+                  <p class="text-base font-bold text-gray-800 num" id="top-entity-tx">0</p>
+                  <p class="text-[11px] text-gray-500 mt-2">Porsi setoran</p>
+                  <p class="text-base font-bold text-gray-800 num" id="top-entity-share">0%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tabel transaksi -->
+      <section class="card overflow-hidden flex flex-col">
+        <div class="p-5 border-b border-gray-100 flex flex-wrap justify-between items-center gap-3 bg-white">
+          <div>
+            <h3 class="text-base font-semibold text-gray-800">Rincian Transaksi</h3>
+            <p class="text-[11px] text-gray-500 mt-0.5" id="table-info">—</p>
+          </div>
+          <div class="flex items-center gap-2 no-print">
+            <div class="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 shadow-sm">
+              <i class="ph ph-funnel text-gray-400 mr-1.5"></i>
+              <select id="table-currency-filter" class="bg-transparent text-xs text-gray-700 outline-none cursor-pointer">
+                <option value="all">Semua mata uang</option>
+                <option value="IDR">IDR saja</option>
+                <option value="USD">USD saja</option>
+              </select>
+            </div>
+            <button id="export-btn" class="px-3 py-1.5 bg-[#0000CD] text-white text-xs font-semibold rounded-lg shadow-sm hover:bg-blue-800 transition active:scale-95 flex items-center gap-1.5">
+              <i class="ph ph-download-simple"></i> Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="fixed text-left text-sm min-w-[720px]">
+            <thead class="bg-gray-50 text-gray-500 font-medium text-xs">
+              <tr>
+                <th class="px-4 py-2.5 w-[22%]">Wajib Bayar</th>
+                <th class="px-4 py-2.5 w-[11%]">Tanggal</th>
+                <th class="px-4 py-2.5 w-[18%]">Satker</th>
+                <th class="px-4 py-2.5 w-[20%]">Layanan / NTPN</th>
+                <th class="px-4 py-2.5 w-[11%]">Akun</th>
+                <th class="px-4 py-2.5 w-[18%] text-right">Setoran</th>
+              </tr>
+            </thead>
+            <tbody id="table-body" class="divide-y divide-gray-100 text-gray-700">
+              <tr><td colspan="6" class="text-center p-5 text-gray-500">Memuat…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="p-3 border-t border-gray-100 flex flex-wrap gap-2 justify-between items-center text-xs text-gray-500" id="table-pagination"></div>
+      </section>
+    </div>
+
+    <!-- ====================== ANALITIK ====================== -->
+    <div class="mt-8 flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 pb-2">
+      <h2 class="text-xl lg:text-2xl font-extrabold text-gray-900">Profil Data &amp; Analitik</h2>
+      <p class="text-xs text-gray-500" id="profile-caption">—</p>
+    </div>
+
+    <!-- 1. SATKER -->
+    <section id="section-satker" class="flex flex-col gap-4 scroll-mt-28">
+      <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <i class="ph-fill ph-buildings text-[#228B22]"></i> Satker / Unit
+      </h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Satker aktif</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="satker-kpi-1">0</h4>
+        </div>
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Rata-rata setoran per satker</p>
+          <h4 class="text-xl font-extrabold text-[#228B22] num mt-1" id="satker-kpi-2">Rp 0</h4>
+        </div>
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Setoran tertinggi</p>
+          <h4 class="text-base font-bold text-gray-700 truncate mt-1" id="satker-kpi-3" title="">—</h4>
+        </div>
+      </div>
+
+      <div class="flex flex-col xl:flex-row gap-4">
+        <div class="card card-pad flex-[6] flex flex-col min-h-[380px]">
+          <h4 class="text-sm font-semibold mb-2">Tren 5 Satker Teratas (ekuivalen IDR)</h4>
+          <div id="chart-satker-line" class="flex-1 w-full min-h-[300px]"></div>
+        </div>
+
+        <div class="card card-pad flex-[4] flex flex-col min-h-[380px]">
+          <h4 class="text-sm font-semibold mb-2">Rincian Satker</h4>
+          <div class="overflow-y-auto flex-1" style="max-height:340px">
+            <table class="fixed text-left text-xs">
+              <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+                <tr>
+                  <th class="p-2.5 w-[52%]">KODE KL / UNIT / SATKER</th>
+                  <th class="p-2.5 w-[14%]">Trx</th>
+                  <th class="p-2.5 w-[34%] text-right">Setoran</th>
+                </tr>
+              </thead>
+              <tbody id="satker-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
+            </table>
+          </div>
+          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="satker-pagination"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. LAYANAN / NTPN -->
+    <section id="section-layanan" class="flex flex-col gap-4 mt-6 scroll-mt-28">
+      <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <i class="ph-fill ph-barcode text-[#0000CD]"></i> Layanan &amp; NTPN
+      </h3>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Jenis layanan unik</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="layanan-kpi-1">0</h4>
+        </div>
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Layanan dengan setoran terbesar</p>
+          <h4 class="text-base font-bold text-[#0000CD] truncate mt-1" id="layanan-kpi-2" title="">—</h4>
+        </div>
+        <div class="card card-pad relative overflow-hidden">
+          <p class="text-xs text-gray-500">Transaksi outlier</p>
+          <h4 class="text-2xl font-extrabold text-red-500 num mt-1" id="layanan-kpi-3">0</h4>
+          <div class="absolute right-2 bottom-1 text-red-100 pointer-events-none"><i class="ph-fill ph-warning text-4xl"></i></div>
+        </div>
+      </div>
+
+      <div class="flex flex-col xl:flex-row gap-4">
+        <div class="card card-pad flex-[6] flex flex-col min-h-[380px]">
+          <h4 class="text-sm font-semibold mb-2">Top 10 Layanan</h4>
+          <div id="chart-layanan-bar" class="flex-1 w-full min-h-[300px]"></div>
+        </div>
+
+        <div class="card card-pad flex-[4] flex flex-col min-h-[380px]">
+          <h4 class="text-sm font-semibold mb-2">Rincian Layanan</h4>
+          <div class="overflow-y-auto flex-1" style="max-height:340px">
+            <table class="fixed text-left text-xs">
+              <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+                <tr>
+                  <th class="p-2.5 w-[52%]">LAYANAN (kolom NTPN)</th>
+                  <th class="p-2.5 w-[14%]">Trx</th>
+                  <th class="p-2.5 w-[34%] text-right">Setoran</th>
+                </tr>
+              </thead>
+              <tbody id="layanan-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
+            </table>
+          </div>
+          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="layanan-pagination"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. WAJIB BAYAR -->
+    <section id="section-payer" class="flex flex-col gap-4 mt-6 scroll-mt-28">
+      <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <i class="ph-fill ph-users-three text-gray-600"></i> Wajib Bayar
+      </h3>
+
+      <div class="flex flex-col xl:flex-row gap-4">
+        <div class="flex-[5] flex flex-col gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="card card-pad">
+              <p class="text-xs text-gray-500">Wajib bayar unik</p>
+              <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="payer-kpi-1">0</h4>
+            </div>
+            <div class="card card-pad">
+              <p class="text-xs text-gray-500">Kontributor teratas</p>
+              <h4 class="text-sm font-bold text-[#0000CD] mt-1 truncate" id="payer-kpi-2" title="">—</h4>
+            </div>
+            <div class="card card-pad">
+              <p class="text-xs text-gray-500">Konsentrasi top-1 (eq.)</p>
+              <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="payer-kpi-3">0%</h4>
+            </div>
+          </div>
+
+          <div class="card card-pad flex-1 relative flex flex-col min-h-[300px]">
+            <h4 class="text-sm font-semibold mb-2">Segmentasi Wajib Bayar (ekuivalen IDR)</h4>
+            <div id="chart-payer-pie" class="flex-1 w-full min-h-[250px]"></div>
+          </div>
+        </div>
+
+        <div class="card card-pad flex-[5] flex flex-col min-h-[420px]">
+          <h4 class="text-sm font-semibold mb-2">Rincian Wajib Bayar</h4>
+          <div class="overflow-y-auto flex-1" style="max-height:380px">
+            <table class="fixed text-left text-xs">
+              <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+                <tr>
+                  <th class="p-2.5 w-[52%]">WAJIB BAYAR</th>
+                  <th class="p-2.5 w-[14%]">Trx</th>
+                  <th class="p-2.5 w-[34%] text-right">Setoran</th>
+                </tr>
+              </thead>
+              <tbody id="payer-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
+            </table>
+          </div>
+          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="payer-pagination"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. KUALITAS DATA -->
+    <section id="section-quality" class="flex flex-col gap-4 mt-6 mb-10 scroll-mt-28">
+      <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+        <i class="ph-fill ph-shield-check text-[#228B22]"></i> Kualitas Data
+      </h3>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="card card-pad lg:col-span-1">
+          <p class="text-xs text-gray-500">Ringkasan pemeriksaan</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 mt-1" id="quality-score">—</h4>
+          <p class="text-xs text-gray-500 mt-1" id="quality-caption">—</p>
+          <div class="mt-4 space-y-2" id="quality-bars"></div>
+          <button id="quality-export" class="mt-4 w-full text-xs font-semibold px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 no-print">
+            <i class="ph ph-file-csv"></i> Unduh temuan (CSV)
+          </button>
+        </div>
+
+        <div class="card card-pad lg:col-span-2">
+          <h4 class="text-sm font-semibold mb-3">Temuan &amp; rekomendasi</h4>
+          <div id="quality-list" class="space-y-2.5 text-xs text-gray-700 max-h-[420px] overflow-y-auto pr-1">
+            <p class="text-gray-500">Memeriksa…</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- ====================== PANEL KANAN ====================== -->
+<aside id="right-sidebar" class="w-[320px] bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] border-l border-gray-200 flex-col z-20 flex-shrink-0 transition-all duration-300 hidden xl:flex h-full">
+  <div class="p-5 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+    <div class="w-11 h-11 rounded-full bg-gradient-to-br from-[#0000CD] to-[#228B22] text-white flex items-center justify-center font-bold flex-shrink-0">BP</div>
+    <div class="min-w-0">
+      <h4 class="text-sm font-bold text-gray-900 truncate">Biro Perencanaan</h4>
+      <p class="text-[11px] text-gray-500">Monitoring PNBP</p>
+    </div>
+    <button id="open-settings" class="ml-auto text-gray-400 hover:text-gray-800 p-1" title="Pengaturan" aria-label="Pengaturan">
+      <i class="ph ph-gear text-xl"></i>
+    </button>
+  </div>
+
+  <div class="p-4 border-b border-gray-100 bg-gray-50/60 flex-shrink-0">
+    <h4 class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Statistik cepat</h4>
+    <div class="flex flex-col gap-2">
+      <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm gap-2">
+        <span class="text-[11px] text-gray-500 font-medium">Total IDR</span>
+        <span class="text-[11px] font-bold text-[#228B22] num text-right" id="rs-total-idr">Rp 0</span>
+      </div>
+      <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm gap-2">
+        <span class="text-[11px] text-gray-500 font-medium">Total USD</span>
+        <span class="text-[11px] font-bold text-[#0000CD] num text-right" id="rs-total-usd">$ 0</span>
+      </div>
+      <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm gap-2">
+        <span class="text-[11px] text-gray-500 font-medium">Periode data</span>
+        <span class="text-[11px] font-bold text-gray-700 text-right" id="rs-period">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Asisten data -->
+  <div class="flex-1 flex flex-col min-h-[240px] border-b border-gray-100 bg-white overflow-hidden">
+    <div class="p-3 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-white flex-shrink-0">
+      <h3 class="text-xs font-bold text-gray-800 flex items-center gap-2">
+        <i class="ph-fill ph-chat-teardrop-text text-purple-600"></i> Tanya Data
+        <span class="chip chip-muted ml-auto">rule-based</span>
+      </h3>
+    </div>
+    <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5" id="chat-log">
+      <div class="bg-gray-100 text-gray-700 text-[11px] p-2.5 rounded-tr-lg rounded-bl-lg rounded-br-lg max-w-[90%] leading-relaxed">
+        Halo. Saya menjawab dari data yang sedang tampil (bukan model bahasa). Coba tanyakan “total”, “terbesar”, “anomali”, “satker”, atau “kualitas data”.
+      </div>
+    </div>
+    <div class="px-2 pt-2 flex flex-wrap gap-1.5 flex-shrink-0">
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Total</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Terbesar</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Anomali</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Satker</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Kualitas</button>
+    </div>
+    <div class="p-2 border-t border-gray-100 bg-gray-50 flex gap-2 flex-shrink-0">
+      <input type="text" id="chat-input" placeholder="Tanya data…" class="flex-1 text-xs px-2.5 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-purple-500 min-w-0">
+      <button id="chat-send" class="bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 transition active:scale-95" aria-label="Kirim">
+        <i class="ph-bold ph-paper-plane-right"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Status & footer -->
+  <div class="p-4 border-t border-gray-100 flex flex-col gap-2.5 bg-white flex-shrink-0">
+    <div class="flex justify-between items-center text-[10px] gap-2">
+      <span class="text-gray-500">Sumber data</span>
+      <span id="rs-source" class="font-bold text-green-600 text-right">—</span>
+    </div>
+    <div class="flex justify-between items-center text-[10px] gap-2">
+      <span class="text-gray-500">Baris dimuat</span>
+      <span id="rs-rows" class="font-bold text-gray-800 num">0</span>
+    </div>
+    <div class="flex justify-between items-center text-[10px] gap-2">
+      <span class="text-gray-500">Sinkron terakhir</span>
+      <span id="rs-synced" class="font-bold text-gray-800 text-right">—</span>
+    </div>
+    <button id="rs-reload" class="mt-1 w-full text-[11px] font-semibold px-3 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition no-print">
+      <i class="ph ph-arrows-clockwise"></i> Muat ulang data
+    </button>
+    <p class="text-[9px] text-center text-gray-400 leading-relaxed mt-1">
+      Biro Perencanaan BMKG · Sumber: SIMPONI-V2<br>
+      Dashboard tidak menulis apa pun ke spreadsheet.
+    </p>
+  </div>
+</aside>
+
+<!-- ====================== DIALOG PENGATURAN ====================== -->
+<dialog id="settings-dialog" class="rounded-2xl p-0 w-[min(560px,92vw)] border border-gray-200 shadow-2xl">
+  <form method="dialog" class="p-5 flex flex-col gap-4" id="settings-form">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-base font-bold text-gray-900">Pengaturan sumber data</h2>
+        <p class="text-[11px] text-gray-500 mt-1">Disimpan di browser ini saja (localStorage).</p>
+      </div>
+      <button value="close" class="text-gray-400 hover:text-gray-700 p-1" aria-label="Tutup"><i class="ph ph-x text-lg"></i></button>
+    </div>
+
+    <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+      Endpoint Apps Script (/exec)
+      <input id="cfg-endpoint" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec"
+        class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD] w-full">
+      <span class="font-normal text-[10px] text-gray-500">Dipakai saat dashboard dibuka dari GitHub Pages / hosting statis.</span>
+    </label>
+
+    <div class="grid grid-cols-2 gap-3">
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+        Kurs USD → IDR
+        <input id="cfg-fx" type="number" min="1" step="1" class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD]">
+      </label>
+      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+        Cache snapshot (menit)
+        <input id="cfg-cache" type="number" min="0" step="1" class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD]">
+      </label>
+    </div>
+
+    <label class="flex items-center gap-2 text-xs font-semibold text-gray-700">
+      <input id="cfg-snapshot" type="checkbox" class="rounded border-gray-300">
+      Pakai snapshot lokal <code class="font-mono text-[10px] bg-gray-100 px-1 rounded">data/latest.json</code> bila GAS gagal
+    </label>
+
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
+      <button type="button" id="cfg-reset" class="text-xs font-semibold text-gray-500 hover:text-gray-800">Kembalikan default</button>
+      <div class="flex gap-2">
+        <button value="close" class="px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Batal</button>
+        <button type="button" id="cfg-save" class="px-4 py-2 text-xs font-semibold rounded-lg bg-[#0000CD] text-white hover:bg-blue-800">Simpan &amp; muat ulang</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<!-- Toast -->
+<div id="toast" class="toast bg-gray-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl"></div>
+
+<script id="app-js">
+
+/* ============================================================================
+ * Dashboard Pembayaran PNBP BMKG — logika aplikasi (single-file)
+ * ----------------------------------------------------------------------------
+ * Alur data:
+ *   google.script.run (di dalam GAS)
+ *     -> JSONP ke endpoint /exec (GitHub Pages / hosting statis)
+ *     -> fetch JSON (bila CORS tersedia)
+ *     -> snapshot lokal data/latest.json
+ *     -> data demo (selalu diberi label "demo")
+ *
+ * Tidak ada penulisan ke spreadsheet. Semua agregasi dilakukan di browser.
+ * ==========================================================================*/
+'use strict';
+
+/* ----------------------------------------------------------------------------
+ * 1. KONFIGURASI
+ * --------------------------------------------------------------------------*/
+const DEFAULT_CONFIG = {
+  // Ganti dengan URL /exec hasil deploy Code.gs yang baru.
+  // Bisa juga di-override lewat ?endpoint=... atau dialog Pengaturan.
+  gasEndpoint: 'https://script.google.com/macros/s/AKfycbxYdaDmYZUSku8mrGPyktlCZRr-Xt2qy2C5UHofJ7vqMcAn50_T6leg6r0W0c3_nYsc/exec',
+  snapshotUrl: 'data/latest.json',
+  fxUsdIdr: 16000,          // kurs asumsi untuk ekuivalen IDR (bisa diubah)
+  useSnapshot: true,
+  cacheMinutes: 15,         // cache payload live di sessionStorage
+  requestTimeoutMs: 15000,
+};
+
+const CONFIG_KEY = 'pnbp.config.v1';
+const CACHE_KEY = 'pnbp.payload.v1';
+
+function loadConfig() {
+  let cfg = { ...DEFAULT_CONFIG };
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+    if (saved && typeof saved === 'object') cfg = { ...cfg, ...saved };
+  } catch (e) { /* localStorage bisa diblokir */ }
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('endpoint')) cfg.gasEndpoint = params.get('endpoint').trim();
+    if (params.get('fx')) cfg.fxUsdIdr = Number(params.get('fx')) || cfg.fxUsdIdr;
+    if (params.get('snapshot') === '0') cfg.useSnapshot = false;
+  } catch (e) { /* URLSearchParams selalu ada di browser modern */ }
+  if (!(cfg.fxUsdIdr > 0)) cfg.fxUsdIdr = DEFAULT_CONFIG.fxUsdIdr;
+  return cfg;
+}
+
+const state = {
+  config: loadConfig(),
+  rows: [],           // baris ternormalisasi
+  view: [],           // baris setelah pencarian + filter mata uang
+  filter: 'Month',
+  search: '',
+  currency: 'all',
+  source: null,       // { kind, label, detail }
+  meta: {},
+  metrics: null,
+  trendLog: false,
+  loading: true,
+  lastSync: null,
+  tablePage: 1,
+};
+
+/* ----------------------------------------------------------------------------
+ * 2. UTILITAS UMUM
+ * --------------------------------------------------------------------------*/
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const esc = (value) => String(value == null ? '' : value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const toNum = (value) => {
+  const n = typeof value === 'number' ? value : parseAmountLoose(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Angka dari sheet: 1234.5 | "1.234,5" | "Rp 1.000.000" | "(2.500)" */
+function parseAmountLoose(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  let s = String(value).trim();
+  if (!s || /^[-–—]+$/.test(s)) return 0;
+  const negative = /^\(.*\)$/.test(s) || /^-/.test(s);
+  s = s.replace(/[^\d.,]/g, '');
+  if (!s) return 0;
+
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    s = s.lastIndexOf(',') > s.lastIndexOf('.')
+      ? s.replace(/\./g, '').replace(/,/g, '.')
+      : s.replace(/,/g, '');
+  } else if (hasComma) {
+    const parts = s.split(',');
+    s = (parts.length === 2 && parts[1].length <= 2) ? s.replace(',', '.') : s.replace(/,/g, '');
+  } else if (hasDot) {
+    const parts = s.split('.');
+    // "1.234.567" atau "1.000" -> pemisah ribuan
+    if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3)) {
+      s = s.replace(/\./g, '');
+    }
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) return 0;
+  return negative ? -n : n;
+}
+
+/** Tanggal: Date | "2026-01-07" | "7/1/2026" | "7 Jan 2026" */
+function parseDateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s || /^[-–—]+$/.test(s)) return null;
+
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let year = Number(m[3]);
+    if (year < 100) year += 2000;
+    // Format Indonesia: dd/mm/yyyy. Jika angka pertama > 12, dipastikan tanggal.
+    let day = Number(m[1]);
+    let month = Number(m[2]);
+    if (month > 12 && day <= 12) { const t = day; day = month; month = t; }
+    const d = new Date(year, month - 1, day);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const fallback = new Date(s);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoDate = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
+/** Kunci periode: Day -> YYYY-MM-DD, Month -> YYYY-MM, Year -> YYYY */
+function periodKey(date, filter) {
+  if (!date) return 'Tanpa tanggal';
+  const y = date.getFullYear();
+  if (filter === 'Day') return isoDate(date);
+  if (filter === 'Year') return String(y);
+  return `${y}-${pad2(date.getMonth() + 1)}`;
+}
+
+const FMT_NUM = new Intl.NumberFormat('id-ID');
+const FMT_IDR = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
+const FMT_USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+
+const fmtNum = (n) => FMT_NUM.format(Math.round(Number(n) || 0));
+
+function fmtIDR(n, compact = false) {
+  const v = Number(n) || 0;
+  if (compact) {
+    const a = Math.abs(v);
+    if (a >= 1e15) return `Rp ${(v / 1e15).toFixed(2)} P`;
+    if (a >= 1e12) return `Rp ${(v / 1e12).toFixed(2)} T`;
+    if (a >= 1e9) return `Rp ${(v / 1e9).toFixed(2)} M`;
+    if (a >= 1e6) return `Rp ${(v / 1e6).toFixed(1)} Jt`;
+    if (a >= 1e3) return `Rp ${(v / 1e3).toFixed(0)} Rb`;
+  }
+  return FMT_IDR.format(v);
+}
+
+function fmtUSD(n, compact = false) {
+  const v = Number(n) || 0;
+  if (compact) {
+    const a = Math.abs(v);
+    if (a >= 1e9) return `$${(v / 1e9).toFixed(2)} B`;
+    if (a >= 1e6) return `$${(v / 1e6).toFixed(2)} M`;
+    if (a >= 1e3) return `$${(v / 1e3).toFixed(1)} K`;
+  }
+  return FMT_USD.format(v);
+}
+
+const fmtAmount = (n, currency, compact = false) => (currency === 'USD'
+  ? fmtUSD(n, compact)
+  : fmtIDR(n, compact));
+
+function fmtPct(n, digits = 1) {
+  if (!Number.isFinite(n)) return '—';
+  return `${n >= 0 ? '' : '−'}${Math.abs(n).toFixed(digits)}%`;
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = parseDateValue(iso);
+  if (!d) return iso;
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Format label periode untuk sumbu chart */
+function fmtPeriodLabel(key) {
+  if (!key || key === 'Tanpa tanggal') return 'Tanpa tanggal';
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  if (/^\d{4}-\d{2}$/.test(key)) {
+    const [y, m] = key.split('-');
+    return `${monthNames[Number(m) - 1]} ${y.slice(2)}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    const [, m, d] = key.split('-');
+    return `${Number(d)} ${monthNames[Number(m) - 1]}`;
+  }
+  return key;
+}
+
+function debounce(fn, wait = 180) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+let toastTimer = null;
+function toast(message) {
+  const el = $('#toast');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4200);
+}
+
+/* ----------------------------------------------------------------------------
+ * 3. PEMETAAN KOLOM SPREADSHEET
+ * --------------------------------------------------------------------------*/
+const FIELD_ALIASES = {
+  payer: ['NAMA WAJIB BAYAR / SETOR', 'NAMA WAJIB BAYAR/SETOR', 'NAMA WAJIB BAYAR', 'WAJIB BAYAR', 'PAYER'],
+  date: ['TANGGAL BAYAR', 'TANGGAL SETOR', 'TANGGAL', 'DATE'],
+  satker: ['KODE KL/UNIT/SATKER', 'KODE KL / UNIT / SATKER', 'KODE KL', 'SATKER', 'UNIT'],
+  billing: ['KODE BILLING', 'BILLING'],
+  bankPos: ['KODE BANK/POS', 'KODE BANK / POS', 'KODE BANK', 'BANK POS'],
+  layanan: ['NTPN', 'LAYANAN', 'JENIS LAYANAN', 'NAMA LAYANAN'],
+  ntb: ['NTB/NTP', 'NTB / NTP', 'NTB', 'NTP'],
+  penerimaan: ['KODE PENERIMAAN', 'KODE PENERIMAAN (F)'],
+  kodePP: ['KODE PP', 'PP'],
+  kodeTarif: ['KODE TARIF', 'TARIF'],
+  nominalTarif: ['NOMINAL TARIF', 'TARIF SATUAN', 'NOMINAL'],
+  volume: ['VOLUME', 'VOL'],
+  currency: ['MATA UANG', 'CURRENCY', 'KURS'],
+  akun: ['KODE AKUN', 'AKUN'],
+  amount: ['SETORAN PER AKUN', 'SETORAN', 'JUMLAH SETORAN', 'NILAI SETORAN', 'AMOUNT'],
+  keterangan: ['KETERANGAN', 'DESKRIPSI', 'CATATAN', 'KET'],
+};
+
+/** Ambil nilai dari objek baris dengan pencocokan header yang toleran */
+function pickField(raw, aliases) {
+  for (const alias of aliases) {
+    if (raw[alias] != null && raw[alias] !== '') return raw[alias];
+  }
+  const lowerMap = raw.__lower || (raw.__lower = Object.keys(raw).reduce((acc, key) => {
+    acc[String(key).trim().toLowerCase()] = raw[key];
+    return acc;
+  }, {}));
+  for (const alias of aliases) {
+    const key = alias.trim().toLowerCase();
+    if (lowerMap[key] != null && lowerMap[key] !== '') return lowerMap[key];
+  }
+  // pencocokan longgar: header mengandung alias
+  const keys = Object.keys(lowerMap);
+  for (const alias of aliases) {
+    const needle = alias.trim().toLowerCase();
+    const found = keys.find((key) => key && key.includes(needle));
+    if (found && lowerMap[found] != null && lowerMap[found] !== '') return lowerMap[found];
+  }
+  return '';
+}
+
+function normalizeRow(raw, index) {
+  if (!raw || typeof raw !== 'object') return null;
+  // Dukungan payload array (urutan kolom sheet A..P)
+  if (Array.isArray(raw)) {
+    const names = Object.keys(FIELD_ALIASES);
+    const obj = {};
+    names.forEach((field, i) => { obj[FIELD_ALIASES[field][0]] = raw[i]; });
+    raw = obj;
+  }
+
+  const dateRaw = pickField(raw, FIELD_ALIASES.date);
+  const date = parseDateValue(dateRaw);
+  const currencyRaw = String(pickField(raw, FIELD_ALIASES.currency) || 'IDR').trim().toUpperCase();
+  const currency = currencyRaw === 'USD' || currencyRaw === 'IDR' ? currencyRaw : (currencyRaw || 'IDR');
+
+  const amount = toNum(pickField(raw, FIELD_ALIASES.amount));
+  const nominalTarif = toNum(pickField(raw, FIELD_ALIASES.nominalTarif));
+  const volume = toNum(pickField(raw, FIELD_ALIASES.volume));
+
+  return {
+    id: index,
+    payer: String(pickField(raw, FIELD_ALIASES.payer) || '').trim(),
+    dateRaw: String(dateRaw || '').trim(),
+    date,
+    dateISO: date ? isoDate(date) : '',
+    satker: String(pickField(raw, FIELD_ALIASES.satker) || '').trim(),
+    billing: String(pickField(raw, FIELD_ALIASES.billing) || '').trim(),
+    bankPos: String(pickField(raw, FIELD_ALIASES.bankPos) || '').trim(),
+    layanan: String(pickField(raw, FIELD_ALIASES.layanan) || '').trim(),
+    ntb: String(pickField(raw, FIELD_ALIASES.ntb) || '').trim(),
+    penerimaan: String(pickField(raw, FIELD_ALIASES.penerimaan) || '').trim(),
+    kodePP: String(pickField(raw, FIELD_ALIASES.kodePP) || '').trim(),
+    kodeTarif: String(pickField(raw, FIELD_ALIASES.kodeTarif) || '').trim(),
+    nominalTarif,
+    volume,
+    currency,
+    akun: String(pickField(raw, FIELD_ALIASES.akun) || '').trim(),
+    amount,
+    keterangan: String(pickField(raw, FIELD_ALIASES.keterangan) || '').trim(),
+  };
+}
+
+/** Normalisasi payload dari GAS / snapshot / demo menjadi array baris */
+function extractRows(payload) {
+  if (Array.isArray(payload)) return { rows: payload, meta: {} };
+  if (payload && Array.isArray(payload.rows)) return { rows: payload.rows, meta: payload.meta || {} };
+  if (payload && Array.isArray(payload.data)) return { rows: payload.data, meta: payload.meta || {} };
+  return { rows: [], meta: {} };
+}
+
+/* ----------------------------------------------------------------------------
+ * 4. PEMUATAN DATA (GAS -> JSONP -> fetch -> snapshot -> demo)
+ * --------------------------------------------------------------------------*/
+const hasGasRuntime = () => typeof google !== 'undefined' && google.script && google.script.run;
+
+function showLoader(title, text) {
+  const el = $('#global-loader');
+  if (!el) return;
+  $('#loader-title').textContent = title;
+  $('#loader-text').textContent = text || '';
+  el.classList.remove('hidden', 'opacity-0');
+}
+
+function hideLoader() {
+  const el = $('#global-loader');
+  if (!el) return;
+  el.classList.add('opacity-0');
+  setTimeout(() => el.classList.add('hidden'), 280);
+}
+
+/** Panggil fungsi Apps Script; mendukung payload baru dan array lama */
+function gasRequest(fnName, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error('Apps Script tidak merespons (timeout).')); }
+    }, timeout);
+
+    google.script.run
+      .withSuccessHandler((result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .withFailureHandler((err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error((err && err.message) || String(err)));
+      })[fnName]();
+  });
+}
+
+/** JSONP: jalur paling andal untuk domain statis (GAS tidak mengirim CORS) */
+function jsonp(url, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cb = '__pnbpCb_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Endpoint tidak merespons (timeout).'));
+    }, timeout);
+
+    window[cb] = (data) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Gagal memuat endpoint (cek akses "Anyone" dan URL /exec).'));
+    };
+
+    try {
+      const target = new URL(url);
+      target.searchParams.set('action', 'data');
+      target.searchParams.set('callback', cb);
+      target.searchParams.set('_', String(Date.now()));
+      script.src = target.toString();
+      document.head.appendChild(script);
+    } catch (e) {
+      settled = true;
+      cleanup();
+      reject(new Error('URL endpoint tidak valid.'));
+    }
+  });
+}
+
+async function fetchJson(url, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readCache() {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+    if (!cached || !cached.at) return null;
+    const ageMs = Date.now() - cached.at;
+    if (ageMs > state.config.cacheMinutes * 60000) return null;
+    return cached;
+  } catch (e) { return null; }
+}
+
+function writeCache(payload) {
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), payload }));
+  } catch (e) { /* kuota penuh: abaikan */ }
+}
+
+const ERRORS = [];
+let liveRefreshInFlight = false;
+
+/** Terapkan payload (array baris / {rows}) ke state lalu render. */
+function applyPayload(payload, source) {
+  const extracted = extractRows(payload);
+  const rows = extracted.rows.map(normalizeRow).filter(Boolean);
+  state.rows = rows;
+  state.meta = extracted.meta || {};
+  state.source = rows.length
+    ? source
+    : { kind: 'empty', label: 'Tidak ada data', detail: 'Sumber terhubung tetapi tidak berisi baris.' };
+  state.loading = false;
+  state.lastSync = new Date();
+  applyView();
+}
+
+async function loadFromGasRuntime() {
+  try {
+    try {
+      const result = await gasRequest('getDashboardPayload');
+      if (result && Array.isArray(result.rows) && result.rows.length) {
+        return { payload: result, source: { kind: 'gas', label: 'Apps Script (live)', detail: 'google.script.run' } };
+      }
+    } catch (err) {
+      // fungsi baru belum ada di deployment lama -> coba fungsi lama
+    }
+    const legacy = await gasRequest('getDashboardData');
+    const extracted = extractRows(legacy);
+    if (extracted.rows.length) {
+      return { payload: extracted, source: { kind: 'gas', label: 'Apps Script (live)', detail: 'google.script.run' } };
+    }
+    ERRORS.push('Apps Script mengembalikan 0 baris.');
+  } catch (err) {
+    ERRORS.push(err.message);
+  }
+  return null;
+}
+
+async function loadSnapshot() {
+  try {
+    const result = await fetchJson(state.config.snapshotUrl, 12000);
+    const extracted = extractRows(result);
+    if (!extracted.rows.length) throw new Error('snapshot kosong');
+    const isDemo = !!(extracted.meta && extracted.meta.demo);
+    return {
+      payload: extracted,
+      source: {
+        kind: isDemo ? 'demo' : 'snapshot',
+        label: isDemo ? 'Data contoh (snapshot)' : 'Snapshot lokal',
+        detail: extracted.meta && extracted.meta.capturedAt
+          ? 'Diambil ' + extracted.meta.capturedAt
+          : state.config.snapshotUrl,
+      },
+    };
+  } catch (err) {
+    ERRORS.push('snapshot: ' + err.message);
+    return null;
+  }
+}
+
+async function loadEndpoint() {
+  const endpoint = state.config.gasEndpoint;
+  if (!endpoint) {
+    ERRORS.push('Endpoint GAS belum diatur.');
+    return null;
+  }
+
+  try {
+    const result = await jsonp(endpoint, 12000);
+    const extracted = extractRows(result);
+    if (!extracted.rows.length) throw new Error('endpoint mengembalikan 0 baris');
+    return {
+      payload: extracted,
+      raw: result,
+      source: { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' },
+    };
+  } catch (err) {
+    ERRORS.push(err.message);
+  }
+
+  // Jalur cadangan: fetch biasa (hanya berhasil bila CORS diizinkan).
+  try {
+    const target = new URL(endpoint);
+    target.searchParams.set('action', 'data');
+    target.searchParams.set('format', 'json');
+    const result = await fetchJson(target.toString(), 12000);
+    const extracted = extractRows(result);
+    if (extracted.rows.length) {
+      return {
+        payload: extracted,
+        raw: result,
+        source: { kind: 'fetch', label: 'Apps Script (live)', detail: 'fetch JSON' },
+      };
+    }
+  } catch (err) {
+    ERRORS.push('fetch: ' + err.message);
+  }
+
+  return null;
+}
+
+/** Ambil data live di latar belakang tanpa mengganggu tampilan yang sudah ada. */
+async function refreshFromLive() {
+  if (liveRefreshInFlight || hasGasRuntime() || !state.config.gasEndpoint) return;
+  liveRefreshInFlight = true;
+  try {
+    const result = await jsonp(state.config.gasEndpoint, 12000);
+    const extracted = extractRows(result);
+    if (!extracted.rows.length) throw new Error('0 baris');
+    writeCache(result);
+    applyPayload(extracted, { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' });
+  } catch (err) {
+    ERRORS.push(err.message);
+    if (state.source && state.source.kind === 'snapshot') {
+      toast('Gagal memperbarui data live: ' + err.message);
+    }
+  } finally {
+    liveRefreshInFlight = false;
+  }
+}
+
+async function loadData({ force = false } = {}) {
+  state.loading = true;
+  ERRORS.length = 0;
+  const cfg = state.config;
+
+  // 1. Di dalam Apps Script: google.script.run paling cepat dan tanpa CORS.
+  if (hasGasRuntime()) {
+    showLoader('Mengambil data dari spreadsheet…', 'google.script.run');
+    const live = await loadFromGasRuntime();
+    if (live) {
+      applyPayload(live.payload, live.source);
+      hideLoader();
+      return;
+    }
+  }
+
+  // 2. Cache sesi & snapshot: tampilkan cepat, lalu segarkan dari live.
+  if (!force) {
+    const cached = readCache();
+    if (cached) {
+      const extracted = extractRows(cached.payload);
+      if (extracted.rows.length) {
+        applyPayload(extracted, { kind: 'cache', label: 'Cache sesi', detail: 'Data live terakhir di tab ini' });
+        hideLoader();
+        refreshFromLive();
+        return;
+      }
+    }
+
+    if (cfg.useSnapshot && cfg.snapshotUrl) {
+      showLoader('Memuat snapshot…', cfg.snapshotUrl);
+      const snapshot = await loadSnapshot();
+      if (snapshot) {
+        applyPayload(snapshot.payload, snapshot.source);
+        hideLoader();
+        refreshFromLive();
+        return;
+      }
+    }
+  }
+
+  // 3. Endpoint GAS (JSONP, lalu fetch).
+  showLoader('Menghubungi Google Apps Script…', cfg.gasEndpoint || 'endpoint belum diatur');
+  const live = await loadEndpoint();
+  if (live) {
+    applyPayload(live.payload, live.source);
+    if (live.raw) writeCache(live.raw);
+    hideLoader();
+    return;
+  }
+
+  // 4. Snapshot (termasuk saat muat ulang paksa).
+  if (cfg.useSnapshot && cfg.snapshotUrl) {
+    const snapshot = await loadSnapshot();
+    if (snapshot) {
+      applyPayload(snapshot.payload, snapshot.source);
+      hideLoader();
+      return;
+    }
+  }
+
+  // 5. Data contoh.
+  applyPayload({ rows: DEMO_ROWS, meta: { demo: true } }, {
+    kind: 'demo',
+    label: 'Data demo',
+    detail: ERRORS.join(' · ') || 'Tidak ada sumber data yang dapat dihubungi',
+  });
+  hideLoader();
+  toast('Data live tidak tersedia — menampilkan data contoh. Atur endpoint di Pengaturan.');
+}
+
+/* ----------------------------------------------------------------------------
+ * 5. FILTER, PENCARIAN, DAN TAMPILAN
+ * --------------------------------------------------------------------------*/
+function applyView() {
+  const term = state.search.trim().toLowerCase();
+  const currency = state.currency;
+
+  state.view = state.rows.filter((row) => {
+    if (currency !== 'all' && row.currency !== currency) return false;
+    if (!term) return true;
+    return [
+      row.payer, row.satker, row.layanan, row.keterangan, row.ntb,
+      row.akun, row.kodePP, row.kodeTarif, row.billing, row.bankPos,
+      row.currency, row.dateISO,
+    ].some((value) => String(value || '').toLowerCase().includes(term));
+  });
+
+  state.tablePage = 1;
+  renderAll();
+}
+
+function updateSearch(value) {
+  state.search = value;
+  applyView();
+}
+
+function setFilter(filter) {
+  state.filter = filter;
+  renderAll();
+}
+
+/* ----------------------------------------------------------------------------
+ * 6. MESIN ANALITIK
+ * --------------------------------------------------------------------------*/
+const colorFor = (index) => ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#DC2626', '#0EA5E9', '#F59E0B', '#14B8A6'][index % 10];
+
+function bump(map, key, row, equivalent) {
+  const name = String(key || '').trim() || 'Tidak diisi';
+  let entry = map.get(name);
+  if (!entry) {
+    entry = { name, idr: 0, usd: 0, other: 0, eq: 0, count: 0, periods: {} };
+    map.set(name, entry);
+  }
+  if (row.currency === 'USD') entry.usd += row.amount;
+  else if (row.currency === 'IDR') entry.idr += row.amount;
+  else entry.other += row.amount;
+  entry.eq += equivalent;
+  entry.count += 1;
+  const key2 = periodKey(row.date, state.filter);
+  entry.periods[key2] = (entry.periods[key2] || 0) + equivalent;
+  return entry;
+}
+
+/** Lengkapi periode yang kosong agar tren tidak "melompat" */
+function buildPeriods(series, filter) {
+  const keys = Object.keys(series).filter((key) => key !== 'Tanpa tanggal').sort();
+  if (!keys.length) return Object.keys(series);
+  if (filter === 'Year') return keys;
+
+  const toDate = (key) => (filter === 'Day' ? parseDateValue(key) : parseDateValue(key + (filter === 'Month' ? '-01' : '')));
+  const first = toDate(keys[0]);
+  const last = toDate(keys[keys.length - 1]);
+  if (!first || !last) return keys;
+
+  const out = [];
+  const cursor = new Date(first.getFullYear(), first.getMonth(), first.getDate());
+  let guard = 0;
+  while (cursor <= last && guard < 800) {
+    guard += 1;
+    const key = filter === 'Day' ? isoDate(cursor) : `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
+    out.push(key);
+    if (filter === 'Day') cursor.setDate(cursor.getDate() + 1);
+    else cursor.setMonth(cursor.getMonth() + 1);
+  }
+  // Untuk filter harian dengan rentang sangat panjang, jangan isi semua hari.
+  if (filter === 'Day' && out.length > 180) return keys;
+  return out;
+}
+
+function computeMetrics(rows, filter, fx) {
+  const series = {};
+  const satkerMap = new Map();
+  const layananMap = new Map();
+  const payerMap = new Map();
+  const akunMap = new Map();
+  const currencyMap = new Map();
+
+  let totalIdr = 0;
+  let totalUsd = 0;
+  let totalOther = 0;
+  let totalEq = 0;
+  let volume = 0;
+  const idrAmounts = [];
+  const usdAmounts = [];
+  const dates = [];
+
+  rows.forEach((row) => {
+    const equivalent = row.currency === 'USD' ? row.amount * fx : row.amount;
+    const key = periodKey(row.date, filter);
+
+    if (!series[key]) series[key] = { idr: 0, usd: 0, other: 0, eq: 0, count: 0, volume: 0 };
+    const bucket = series[key];
+    bucket.count += 1;
+    bucket.eq += equivalent;
+    bucket.volume += row.volume;
+
+    if (row.currency === 'USD') { bucket.usd += row.amount; totalUsd += row.amount; usdAmounts.push(row.amount); }
+    else if (row.currency === 'IDR') { bucket.idr += row.amount; totalIdr += row.amount; idrAmounts.push(row.amount); }
+    else { bucket.other += row.amount; totalOther += row.amount; }
+
+    totalEq += equivalent;
+    volume += row.volume;
+    if (row.date) dates.push(row.dateISO);
+
+    bump(satkerMap, row.satker, row, equivalent);
+    bump(layananMap, row.layanan, row, equivalent);
+    bump(payerMap, row.payer, row, equivalent);
+    bump(akunMap, row.akun, row, equivalent);
+
+    const cur = row.currency || 'IDR';
+    currencyMap.set(cur, (currencyMap.get(cur) || 0) + 1);
+  });
+
+  const periods = buildPeriods(series, filter).filter((key) => key !== 'Tanpa tanggal');
+  const sortByEq = (map) => Array.from(map.values()).sort((a, b) => b.eq - a.eq);
+  const satkers = sortByEq(satkerMap);
+  const layanans = sortByEq(layananMap);
+  const payers = sortByEq(payerMap);
+  const akuns = sortByEq(akunMap);
+  const amounts = rows.filter((r) => r.amount > 0).map((r) => r.amount);
+
+  const sortedIdr = idrAmounts.filter((v) => v > 0).sort((a, b) => a - b);
+  const median = sortedIdr.length
+    ? (sortedIdr.length % 2 ? sortedIdr[(sortedIdr.length - 1) / 2]
+      : (sortedIdr[sortedIdr.length / 2 - 1] + sortedIdr[sortedIdr.length / 2]) / 2)
+    : 0;
+
+  const dateList = dates.slice().sort();
+
+  return {
+    rows,
+    filter,
+    fx,
+    count: rows.length,
+    totalIdr,
+    totalUsd,
+    totalOther,
+    totalEq,
+    volume,
+    avg: rows.length ? totalEq / rows.length : 0,
+    medianIdr: median,
+    entities: payers.length,
+    satkers,
+    layanans,
+    payers,
+    akuns,
+    periods,
+    series,
+    currencyMap,
+    anomalies: detectAnomalies(rows),
+    periodRange: dateList.length ? { from: dateList[0], to: dateList[dateList.length - 1] } : null,
+    quality: null,
+    concentration: payers.length && totalEq > 0 ? (payers[0].eq / totalEq) * 100 : 0,
+    hhi: totalEq > 0
+      ? payers.reduce((sum, p) => sum + Math.pow((p.eq / totalEq) * 100, 2), 0)
+      : 0,
+    idrCount: idrAmounts.length,
+    usdCount: usdAmounts.length,
+    amounts,
+  };
+}
+
+/** Anomali: |z| > 3 dihitung terpisah per mata uang (skala IDR vs USD jauh berbeda) */
+function detectAnomalies(rows) {
+  const out = [];
+  ['IDR', 'USD'].forEach((currency) => {
+    const group = rows.filter((r) => r.currency === currency && r.amount > 0);
+    if (group.length < 5) return;
+    const values = group.map((r) => r.amount);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+    const sd = Math.sqrt(variance);
+    if (!(sd > 0)) return;
+    group.forEach((row) => {
+      const z = (row.amount - mean) / sd;
+      if (z > 3) out.push({ row, z, mean, sd, currency });
+    });
+  });
+  return out.sort((a, b) => b.z - a.z);
+}
+
+/* ------------------------------ kualitas data ------------------------------ */
+function runQualityChecks(rows, metrics) {
+  const total = rows.length || 1;
+  const checks = [];
+
+  const add = (check) => {
+    if (!check.count) return;
+    check.pct = (check.count / total) * 100;
+    checks.push(check);
+  };
+
+  const list = (label, predicate, sampleFn) => {
+    const hits = rows.filter(predicate);
+    return {
+      count: hits.length,
+      samples: hits.slice(0, 3).map(sampleFn).filter(Boolean),
+    };
+  };
+
+  const invalidDate = list('tanggal', (r) => !r.date, (r) => `${r.payer || '?'} · "${r.dateRaw || '(kosong)'}"`);
+  add({
+    id: 'tanggal',
+    label: 'Tanggal bayar tidak terbaca',
+    severity: 'bad',
+    ...invalidDate,
+    detail: 'Baris tanpa tanggal tidak masuk tren periode dan bisa memotong proyeksi.',
+    fix: 'Pastikan kolom TANGGAL BAYAR berformat tanggal (bukan teks), lalu isi ulang sel kosong.',
+  });
+
+  const scientific = list('kode', (r) => [r.billing, r.bankPos, r.ntb].some((v) => /E\+\d/i.test(v)),
+    (r) => `${r.payer || '?'} · billing "${r.billing}" · NTB "${r.ntb}"`);
+  add({
+    id: 'eksponen',
+    label: 'Kode billing/NTB tampil dalam notasi eksponen',
+    severity: 'warn',
+    ...scientific,
+    detail: 'Excel/Sheets mengubah angka panjang menjadi 8,2E+18 sehingga nomor billing tidak bisa dicocokkan ulang.',
+    fix: 'Format kolom KODE BILLING, KODE BANK/POS, dan NTB/NTP sebagai Teks, atau awali dengan apostrof.',
+  });
+
+  const noPayer = list('payer', (r) => !r.payer, () => 'Baris tanpa nama wajib bayar');
+  add({
+    id: 'payer',
+    label: 'Nama wajib bayar kosong',
+    severity: 'warn',
+    ...noPayer,
+    detail: 'Segmentasi dan analisis konsentrasi menjadi tidak lengkap.',
+    fix: 'Lengkapi kolom NAMA WAJIB BAYAR / SETOR dari data billing.',
+  });
+
+  const noKet = list('keterangan', (r) => !r.keterangan, (r) => r.payer || '(tanpa nama)');
+  add({
+    id: 'keterangan',
+    label: 'Keterangan transaksi kosong',
+    severity: 'info',
+    ...noKet,
+    detail: 'Keterangan membantu audit dan klasifikasi layanan.',
+    fix: 'Isi keterangan saat input setoran agar jejak audit lengkap.',
+  });
+
+  // NTB/NTP ganda (indikasi baris dobel)
+  const ntbCount = new Map();
+  rows.forEach((r) => { if (r.ntb) ntbCount.set(r.ntb, (ntbCount.get(r.ntb) || 0) + 1); });
+  const duplicateNtb = Array.from(ntbCount.entries()).filter(([, n]) => n > 1);
+  add({
+    id: 'duplikat',
+    label: 'Nomor NTB/NTP muncul lebih dari sekali',
+    severity: 'warn',
+    count: duplicateNtb.reduce((sum, [, n]) => sum + n, 0),
+    samples: duplicateNtb.slice(0, 3).map(([ntb, n]) => `NTB ${ntb} · ${n} baris`),
+    detail: 'Satu NTB idealnya satu setoran. Duplikasi bisa berarti data dobel atau pemecahan setoran per akun.',
+    fix: 'Pastikan baris tidak terduplikasi saat impor; gunakan kolom NTB sebagai kunci cek ganda.',
+  });
+
+  // Setoran vs nominal tarif × volume
+  const mismatch = list(
+    'hitung',
+    (r) => r.nominalTarif > 0 && r.volume > 0 && Math.abs(r.amount - r.nominalTarif * r.volume) > Math.max(1, Math.abs(r.amount) * 0.02),
+    (r) => `${r.payer || '?'} · ${fmtNum(r.volume)} × ${fmtNum(r.nominalTarif)} ≠ ${fmtNum(r.amount)}`,
+  );
+  add({
+    id: 'hitung',
+    label: 'Setoran tidak sama dengan tarif × volume',
+    severity: 'warn',
+    ...mismatch,
+    detail: 'Bisa karena tarif bertingkat, diskon, atau salah input volume.',
+    fix: 'Cek ulang baris tersebut; bila memang bertingkat, catat penjelasannya di kolom KETERANGAN.',
+  });
+
+  const nonPositive = list('nol', (r) => r.amount <= 0, (r) => `${r.payer || '?'} · ${fmtNum(r.amount)}`);
+  add({
+    id: 'nol',
+    label: 'Nilai setoran nol atau negatif',
+    severity: 'warn',
+    ...nonPositive,
+    detail: 'Baris seperti ini menurunkan rata-rata dan membingungkan total.',
+    fix: 'Hapus baris kosong atau koreksi nilai setoran.',
+  });
+
+  const otherCurrency = rows.filter((r) => r.currency !== 'IDR' && r.currency !== 'USD');
+  add({
+    id: 'kurs',
+    label: 'Mata uang di luar IDR/USD',
+    severity: 'warn',
+    count: otherCurrency.length,
+    samples: otherCurrency.slice(0, 3).map((r) => `${r.payer || '?'} · "${r.currency}"`),
+    detail: 'Ekuivalen IDR memakai kurs asumsi sehingga total bisa bias.',
+    fix: 'Standarkan kode mata uang (IDR/USD) pada kolom MATA UANG.',
+  });
+
+  const future = rows.filter((r) => r.date && r.date.getTime() > Date.now() + 86400000);
+  add({
+    id: 'masa-depan',
+    label: 'Tanggal berada di masa depan',
+    severity: 'info',
+    count: future.length,
+    samples: future.slice(0, 3).map((r) => `${r.dateISO} · ${r.payer || '?'}`),
+    detail: 'Bisa berupa jadwal atau salah tahun.',
+    fix: 'Verifikasi tanggal input.',
+  });
+
+  const weights = { bad: 1, warn: 0.35, info: 0.15 };
+  const penalty = checks.reduce((sum, c) => sum + Math.min(20, c.pct * (weights[c.severity] || 0.25)), 0);
+  const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));
+
+  return { checks, score, total: rows.length, flagged: checks.reduce((max, c) => Math.max(max, c.count), 0) };
+}
+
+/* ------------------------------ proyeksi ------------------------------ */
+/** Regresi linear + interval prediksi (bukan sekadar garis lurus) */
+function linearForecast(values, horizon = 3) {
+  const n = values.length;
+  if (n < 3) return null;
+
+  const meanX = (n - 1) / 2;
+  const meanY = values.reduce((a, b) => a + b, 0) / n;
+
+  let sxx = 0;
+  let sxy = 0;
+  values.forEach((y, x) => { sxx += Math.pow(x - meanX, 2); sxy += (x - meanX) * (y - meanY); });
+  if (!(sxx > 0)) return null;
+
+  const slope = sxy / sxx;
+  const intercept = meanY - slope * meanX;
+
+  let sse = 0;
+  let sst = 0;
+  values.forEach((y, x) => {
+    sse += Math.pow(y - (intercept + slope * x), 2);
+    sst += Math.pow(y - meanY, 2);
+  });
+  const r2 = sst > 0 ? 1 - sse / sst : 0;
+  const sigma = n > 2 ? Math.sqrt(sse / (n - 2)) : 0;
+
+  const fitted = values.map((_, x) => Math.max(0, intercept + slope * x));
+  const future = [];
+  for (let h = 1; h <= horizon; h += 1) {
+    const x0 = n - 1 + h;
+    const estimate = Math.max(0, intercept + slope * x0);
+    // interval prediksi 95% (t ≈ 1.96; cukup untuk n > 8)
+    const se = sigma * Math.sqrt(1 + 1 / n + Math.pow(x0 - meanX, 2) / sxx);
+    future.push({
+      value: estimate,
+      lower: Math.max(0, estimate - 1.96 * se),
+      upper: estimate + 1.96 * se,
+    });
+  }
+
+  return { slope, intercept, r2, fitted, future, sigma };
+}
+
+/* ----------------------------------------------------------------------------
+ * 7. INFRASTRUKTUR ECHARTS
+ * --------------------------------------------------------------------------*/
+const charts = {};
+const chartObserver = (typeof ResizeObserver !== 'undefined')
+  ? new ResizeObserver((entries) => {
+    entries.forEach((entry) => {
+      const inst = charts[entry.target.id];
+      if (inst && !inst.isDisposed()) inst.resize();
+    });
+  })
+  : null;
+
+function initChart(id) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  if (typeof echarts === 'undefined') {
+    if (!el.dataset.fallback) {
+      el.dataset.fallback = '1';
+      el.innerHTML = '<div class="h-full flex items-center justify-center text-center text-xs text-gray-400 p-4">Chart library gagal dimuat (CDN diblokir). Angka tetap tersedia di tabel di bawah.</div>';
+    }
+    return null;
+  }
+  if (!charts[id]) {
+    charts[id] = echarts.init(el, null, { renderer: 'canvas' });
+    if (chartObserver) chartObserver.observe(el);
+  }
+  return charts[id];
+}
+
+const AXIS_LABEL = { color: '#94a3b8', fontSize: 10 };
+const SPLIT_LINE = { lineStyle: { type: 'dashed', color: '#f1f5f9' } };
+const GRID = { top: '12%', left: '2%', right: '3%', bottom: '12%', containLabel: true };
+const TOOLTIP = {
+  trigger: 'axis',
+  backgroundColor: 'rgba(255,255,255,.97)',
+  borderColor: '#e2e8f0',
+  textStyle: { color: '#0f172a', fontSize: 11 },
+  axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(148,163,184,.08)' } },
+};
+
+function emptyChart(inst, message = 'Tidak ada data pada filter ini') {
+  if (!inst) return;
+  inst.clear();
+  inst.setOption({
+    title: {
+      text: message,
+      left: 'center',
+      top: 'middle',
+      textStyle: { color: '#94a3b8', fontSize: 11, fontWeight: 'normal' },
+    },
+  });
+}
+
+function compactAxisLabel(currency) {
+  return (value) => fmtAmount(value, currency, true).replace(currency === 'USD' ? 'USD ' : 'Rp ', '');
+}
+
+/* ----------------------------------------------------------------------------
+ * 8. RENDER: SUMBER, BANNER, KPI
+ * --------------------------------------------------------------------------*/
+const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+const setHTML = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+
+const SOURCE_STYLE = {
+  gas: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
+  jsonp: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
+  fetch: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
+  cache: { cls: 'text-amber-600', dot: 'bg-amber-400' },
+  snapshot: { cls: 'text-amber-600', dot: 'bg-amber-400' },
+  demo: { cls: 'text-red-500', dot: 'bg-red-400' },
+  empty: { cls: 'text-gray-500', dot: 'bg-gray-400' },
+};
+
+function renderSource(metrics) {
+  const source = state.source || { kind: 'empty', label: '—', detail: '' };
+  const style = SOURCE_STYLE[source.kind] || SOURCE_STYLE.empty;
+  const label = source.label + (source.kind === 'demo' && !/contoh/i.test(source.label) ? ' (contoh)' : '');
+
+  setText('rs-source', label);
+  const rsSource = $('#rs-source');
+  if (rsSource) {
+    rsSource.className = `font-bold text-right ${style.cls}`;
+    rsSource.title = source.detail || '';
+  }
+  setText('insight-source', label);
+  const dot = $('#insight-source-dot');
+  if (dot) dot.className = `src-dot ${style.dot}`;
+
+  setText('rs-rows', fmtNum(state.rows.length));
+  setText('rs-total-idr', fmtIDR(metrics.totalIdr, true));
+  setText('rs-total-usd', fmtUSD(metrics.totalUsd, true));
+  setText('rs-period', metrics.periodRange ? `${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}` : '—');
+  setText('rs-synced', state.lastSync
+    ? state.lastSync.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    : '—');
+
+  const styleEl = $('#rs-source');
+  if (styleEl && source.kind === 'demo') styleEl.title = source.detail;
+}
+
+function renderBanner(metrics) {
+  setText('insight-total-idr', fmtIDR(metrics.totalIdr));
+  setText('insight-total-usd', fmtUSD(metrics.totalUsd));
+  setText('insight-combined', fmtIDR(metrics.totalEq));
+  setText('insight-fx-note',
+    `Ekuivalen IDR memakai kurs asumsi 1 USD = ${fmtNum(state.config.fxUsdIdr)} IDR (bisa diubah di Pengaturan).`);
+}
+
+function renderKpis(metrics) {
+  setText('kpi-tx', fmtNum(metrics.count));
+  setText('kpi-tx-note', `${fmtNum(metrics.idrCount)} IDR · ${fmtNum(metrics.usdCount)} USD`);
+
+  setText('kpi-vol', fmtNum(metrics.volume));
+  setText('kpi-vol-note', metrics.count ? `rata-rata ${fmtNum(metrics.volume / metrics.count)} per transaksi` : '—');
+
+  setText('kpi-avg', fmtIDR(metrics.avg, true));
+  setText('kpi-avg-note', metrics.medianIdr ? `median IDR ${fmtIDR(metrics.medianIdr, true)}` : '—');
+
+  setText('kpi-entities', fmtNum(metrics.entities));
+  setText('kpi-entities-note', metrics.payers.length ? `top-1 menyumbang ${metrics.concentration.toFixed(1)}%` : '—');
+
+  setText('kpi-satker', fmtNum(metrics.satkers.length));
+  setText('kpi-satker-note', metrics.satkers.length ? metrics.satkers[0].name : '—');
+}
+
+function updateProfileCaption(metrics) {
+  const range = metrics.periodRange
+    ? `${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}`
+    : 'tanpa tanggal';
+  setText('profile-caption',
+    `${fmtNum(state.view.length)} baris · ${fmtNum(state.rows.length)} total dimuat · ${range}`);
+}
+
+/* ----------------------------------------------------------------------------
+ * 9. RENDER: CHART
+ * --------------------------------------------------------------------------*/
+const fmtTooltipAmount = (row) => `${row.currency === 'USD' ? fmtUSD(row.amount) : fmtIDR(row.amount)} <span class="text-gray-400">(${esc(row.currency)})</span>`;
+
+function nextPeriodKeys(lastKey, filter, count) {
+  const out = [];
+  const base = parseDateValue(filter === 'Month' ? `${lastKey}-01` : lastKey);
+  if (!base) return out;
+  for (let i = 1; i <= count; i += 1) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    if (filter === 'Day') d.setDate(d.getDate() + i);
+    else if (filter === 'Year') d.setFullYear(d.getFullYear() + i);
+    else d.setMonth(d.getMonth() + i);
+    out.push(periodKey(d, filter));
+  }
+  return out;
+}
+
+function renderForecast(metrics) {
+  const inst = initChart('chart-forecast');
+  if (!inst) return;
+
+  const note = $('#forecast-note');
+  const periods = metrics.periods.filter((key) => key !== 'Tanpa tanggal');
+  const values = periods.map((key) => (metrics.series[key] ? metrics.series[key].eq : 0));
+  const horizon = state.filter === 'Year' ? 2 : 3;
+
+  if (periods.length < 3) {
+    emptyChart(inst, 'Butuh minimal 3 periode untuk proyeksi');
+    if (note) note.textContent = 'Ubah filter ke Bulan/Tahun atau muat data dengan rentang lebih panjang.';
+    return;
+  }
+
+  const forecast = linearForecast(values, horizon);
+  if (!forecast) {
+    emptyChart(inst, 'Data belum cukup stabil untuk proyeksi');
+    if (note) note.textContent = '—';
+    return;
+  }
+
+  const futureKeys = nextPeriodKeys(periods[periods.length - 1], state.filter, horizon);
+  const labels = periods.concat(futureKeys).map(fmtPeriodLabel);
+  const actual = values.concat(futureKeys.map(() => null));
+  const projected = periods.map((_, i) => (i === periods.length - 1 ? values[i] : null))
+    .concat(forecast.future.map((f) => f.value));
+  const upper = periods.map(() => null).concat(forecast.future.map((f) => f.upper));
+  const lower = periods.map(() => null).concat(forecast.future.map((f) => f.lower));
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const items = params.filter((p) => p.value != null);
+        if (!items.length) return '';
+        return `<b>${items[0].axisValue}</b><br>${items.map((p) => `${p.marker} ${p.seriesName}: ${fmtIDR(p.value)}`).join('<br>')}`;
+      },
+    },
+    legend: { bottom: 0, textStyle: { fontSize: 10, color: '#64748b' }, itemWidth: 12, itemHeight: 8 },
+    grid: { ...GRID, bottom: '20%' },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: labels,
+      axisLabel: { ...AXIS_LABEL, interval: labels.length > 16 ? 'auto' : 0, rotate: labels.length > 10 ? 30 : 0 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) },
+      splitLine: SPLIT_LINE,
+      axisLine: { show: false },
+    },
+    series: [
+      {
+        name: 'Batas bawah 95%',
+        type: 'line',
+        data: lower,
+        symbol: 'none',
+        lineStyle: { opacity: 0 },
+        areaStyle: { opacity: 0 },
+        stack: 'band',
+        silent: true,
+      },
+      {
+        name: 'Batas atas 95%',
+        type: 'line',
+        data: upper.map((v, i) => (v == null ? null : v - (lower[i] || 0))),
+        symbol: 'none',
+        lineStyle: { opacity: 0 },
+        areaStyle: { color: 'rgba(147,51,234,.08)' },
+        stack: 'band',
+        silent: true,
+      },
+      {
+        name: 'Aktual',
+        type: 'line',
+        data: actual,
+        smooth: false,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { width: 2.5, color: '#0000CD' },
+        itemStyle: { color: '#0000CD' },
+        areaStyle: { color: 'rgba(0,0,205,.06)' },
+      },
+      {
+        name: 'Proyeksi',
+        type: 'line',
+        data: projected,
+        smooth: false,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { width: 2.5, type: 'dashed', color: '#9333ea' },
+        itemStyle: { color: '#9333ea' },
+      },
+    ],
+  });
+
+  const next = forecast.future[0];
+  const last = values[values.length - 1] || 0;
+  const delta = last > 0 ? ((next.value - last) / last) * 100 : 0;
+  const dir = forecast.slope > 0 ? 'naik' : forecast.slope < 0 ? 'turun' : 'datar';
+
+  // Peringatan bila periode terakhir tampak belum lengkap (jumlah transaksi jauh
+  // di bawah median), karena ini membuat arah tren mudah menyesatkan.
+  const counts = periods.map((key) => (metrics.series[key] ? metrics.series[key].count : 0));
+  const sortedCounts = counts.slice().sort((a, b) => a - b);
+  const medianCount = sortedCounts[Math.floor(sortedCounts.length / 2)] || 0;
+  const lastCount = counts[counts.length - 1] || 0;
+  const partialNote = (medianCount > 2 && lastCount < medianCount * 0.6)
+    ? ` Catatan: ${fmtPeriodLabel(periods[periods.length - 1])} baru berisi ${fmtNum(lastCount)} transaksi `
+      + `(median ${fmtNum(medianCount)}), kemungkinan belum lengkap sehingga arah tren bisa bias.`
+    : '';
+
+  if (note) {
+    note.textContent = `Tren ${dir} · R² ${forecast.r2.toFixed(2)} · proyeksi ${fmtPeriodLabel(futureKeys[0])}: `
+      + `${fmtIDR(next.value)} (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% vs periode terakhir), `
+      + `rentang 95% ${fmtIDR(next.lower, true)} – ${fmtIDR(next.upper, true)}.${partialNote}`;
+  }
+}
+
+function renderAnomalies(metrics) {
+  const container = $('#anomaly-list');
+  if (!container) return;
+  const items = metrics.anomalies.slice(0, 6);
+
+  if (!items.length) {
+    container.innerHTML = `
+      <div class="p-3 rounded-lg border border-green-100 bg-green-50 text-[11px] text-green-800 leading-relaxed">
+        <strong>Tidak ada anomali.</strong> Semua nilai berada dalam 3 standar deviasi dari rata-rata per mata uang.
+      </div>`;
+  } else {
+    container.innerHTML = items.map(({ row, z }) => `
+      <div class="p-2.5 rounded-lg border border-red-100 bg-red-50/70">
+        <div class="flex items-start justify-between gap-2">
+          <span class="font-bold text-red-800 truncate" title="${esc(row.payer)}">${esc(row.payer || '(tanpa nama)')}</span>
+          <span class="chip chip-bad shrink-0">z ${z.toFixed(1)}</span>
+        </div>
+        <p class="text-[10px] text-gray-600 mt-0.5 truncate" title="${esc(row.satker)}">${esc(fmtDateShort(row.dateISO))} · ${esc(row.satker || '—')}</p>
+        <p class="font-extrabold text-red-700 mt-1 num">${esc(fmtAmount(row.amount, row.currency))}</p>
+      </div>`).join('');
+  }
+
+  setText('anomaly-note', `${metrics.anomalies.length} transaksi di luar |z| > 3`);
+  setText('layanan-kpi-3', fmtNum(metrics.anomalies.length));
+}
+
+function renderTrend(metrics) {
+  const inst = initChart('chart-trend');
+  if (!inst) return;
+  const periods = metrics.periods;
+  if (!periods.length) { emptyChart(inst); return; }
+
+  const log = state.trendLog;
+  const idr = periods.map((key) => (metrics.series[key] ? metrics.series[key].idr : 0));
+  const usd = periods.map((key) => (metrics.series[key] ? metrics.series[key].usd : 0));
+  const vol = periods.map((key) => (metrics.series[key] ? metrics.series[key].volume : 0));
+  const scale = (arr) => (log ? arr.map((v) => Math.max(1, v)) : arr);
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const idx = params[0] ? params[0].dataIndex : 0;
+        const key = periods[idx];
+        const bucket = metrics.series[key] || { idr: 0, usd: 0, volume: 0, count: 0 };
+        return `<b>${fmtPeriodLabel(key)}</b><br>
+          <span class="text-gray-500">Transaksi:</span> ${fmtNum(bucket.count)}<br>
+          <span class="text-gray-500">IDR:</span> ${fmtIDR(bucket.idr)}<br>
+          <span class="text-gray-500">USD:</span> ${fmtUSD(bucket.usd)}<br>
+          <span class="text-gray-500">Volume:</span> ${fmtNum(bucket.volume)}`;
+      },
+    },
+    legend: {
+      bottom: 0,
+      textStyle: { fontSize: 10, color: '#64748b' },
+      itemWidth: 12,
+      itemHeight: 8,
+      data: ['Setoran IDR', 'Setoran USD', 'Volume'],
+      selected: { Volume: false },
+    },
+    grid: { ...GRID, bottom: '22%' },
+    xAxis: {
+      type: 'category',
+      boundaryGap: !log,
+      data: periods.map(fmtPeriodLabel),
+      axisLabel: { ...AXIS_LABEL, interval: periods.length > 16 ? 'auto' : 0, rotate: periods.length > 10 ? 30 : 0 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisTick: { show: false },
+    },
+    yAxis: [
+      {
+        type: log ? 'log' : 'value',
+        name: 'IDR',
+        nameTextStyle: { color: '#94a3b8', fontSize: 9 },
+        axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) },
+        splitLine: SPLIT_LINE,
+      },
+      {
+        type: log ? 'log' : 'value',
+        name: 'USD',
+        nameTextStyle: { color: '#94a3b8', fontSize: 9 },
+        axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtUSD(v, true) },
+        splitLine: { show: false },
+      },
+      { type: 'value', show: false },
+    ],
+    series: [
+      {
+        name: 'Setoran IDR',
+        type: log ? 'line' : 'bar',
+        yAxisIndex: 0,
+        data: scale(idr),
+        barMaxWidth: 26,
+        lineStyle: { width: 2.5, color: '#0000CD' },
+        itemStyle: log ? { color: '#0000CD' } : { color: '#0000CD', borderRadius: [4, 4, 0, 0] },
+        symbol: 'circle',
+        symbolSize: 5,
+      },
+      {
+        name: 'Setoran USD',
+        type: 'line',
+        yAxisIndex: 1,
+        data: scale(usd),
+        smooth: false,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { width: 2.5, color: '#228B22' },
+        itemStyle: { color: '#228B22' },
+      },
+      {
+        name: 'Volume',
+        type: 'line',
+        yAxisIndex: 2,
+        data: vol,
+        smooth: false,
+        symbol: 'none',
+        lineStyle: { width: 1.5, type: 'dashed', color: '#94a3b8' },
+        itemStyle: { color: '#94a3b8' },
+      },
+    ],
+  });
+}
+
+function renderTopSatker(metrics) {
+  const inst = initChart('chart-top-satker');
+  if (!inst) return;
+  const top = metrics.satkers.slice(0, 8).reverse();
+  if (!top.length) { emptyChart(inst); return; }
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const item = top[params[0].dataIndex];
+        return `<b>${esc(item.name)}</b><br>Setoran: ${fmtIDR(item.eq)}<br>Transaksi: ${fmtNum(item.count)}`;
+      },
+    },
+    grid: { top: '4%', left: '2%', right: '6%', bottom: '4%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    yAxis: {
+      type: 'category',
+      data: top.map((s) => (s.name.length > 26 ? s.name.slice(0, 26) + '…' : s.name)),
+      axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 150, overflow: 'truncate' },
+      axisTick: { show: false },
+      axisLine: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      data: top.map((s, i) => ({ value: s.eq, itemStyle: { color: colorFor(i) } })),
+      barMaxWidth: 18,
+      itemStyle: { borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtIDR(p.value, true) },
+    }],
+  });
+}
+
+function renderAkun(metrics) {
+  const inst = initChart('chart-akun');
+  if (!inst) return;
+  const items = metrics.akuns.filter((a) => a.idr > 0).slice(0, 6);
+  if (!items.length) { emptyChart(inst, 'Tidak ada setoran IDR'); return; }
+
+  const total = items.reduce((sum, a) => sum + a.idr, 0);
+  const rest = metrics.akuns.reduce((sum, a) => sum + a.idr, 0) - total;
+  const data = items.map((a) => ({ name: 'Akun ' + a.name, value: a.idr }));
+  if (rest > 0) data.push({ name: 'Akun lain', value: rest });
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(255,255,255,.97)',
+      borderColor: '#e2e8f0',
+      textStyle: { color: '#0f172a', fontSize: 11 },
+      formatter: (p) => `${esc(p.name)}<br>${fmtIDR(p.value)} (${p.percent}%)`,
+    },
+    legend: { bottom: 0, icon: 'circle', textStyle: { fontSize: 9 }, itemWidth: 8, itemHeight: 8 },
+    color: ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#cbd5e1'],
+    series: [{
+      type: 'pie',
+      radius: ['42%', '66%'],
+      center: ['50%', '44%'],
+      avoidLabelOverlap: true,
+      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 11, fontWeight: 'bold', formatter: '{b}\n{d}%' } },
+      data,
+    }],
+  });
+}
+
+function renderCumulative(metrics) {
+  const inst = initChart('chart-cumulative');
+  if (!inst) return;
+  const periods = metrics.periods;
+  if (!periods.length) { emptyChart(inst); return; }
+
+  let running = 0;
+  const cumulative = periods.map((key) => {
+    running += metrics.series[key] ? metrics.series[key].eq : 0;
+    return running;
+  });
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const idx = params[0].dataIndex;
+        return `<b>${fmtPeriodLabel(periods[idx])}</b><br>Kumulatif: ${fmtIDR(cumulative[idx])}`;
+      },
+    },
+    grid: { ...GRID, bottom: '18%' },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: periods.map(fmtPeriodLabel),
+      axisLabel: { ...AXIS_LABEL, interval: periods.length > 10 ? 'auto' : 0, rotate: periods.length > 8 ? 30 : 0 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisTick: { show: false },
+    },
+    yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    series: [{
+      type: 'line',
+      data: cumulative,
+      smooth: false,
+      symbol: 'none',
+      lineStyle: { width: 2.5, color: '#228B22' },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(34,139,34,.28)' },
+            { offset: 1, color: 'rgba(34,139,34,.02)' },
+          ],
+        },
+      },
+    }],
+  });
+}
+
+function renderTopEntity(metrics) {
+  const top = metrics.payers[0];
+  if (!top) {
+    setText('top-entity-name', '—');
+    setText('top-entity-satker', '—');
+    setText('top-entity-idr', 'Rp 0');
+    setText('top-entity-usd', '$ 0');
+    setText('top-entity-tx', '0');
+    setText('top-entity-share', '0%');
+    return;
+  }
+
+  const row = metrics.rows.find((r) => r.payer === top.name) || {};
+  const nameEl = $('#top-entity-name');
+  if (nameEl) {
+    nameEl.textContent = top.name;
+    nameEl.title = top.name;
+  }
+  setText('top-entity-satker', row.satker || '—');
+  setText('top-entity-idr', top.idr > 0 ? fmtIDR(top.idr) : '—');
+  setText('top-entity-usd', top.usd > 0 ? fmtUSD(top.usd) : '—');
+  setText('top-entity-tx', fmtNum(top.count) + ' trx');
+  setText('top-entity-share', `${((top.eq / (metrics.totalEq || 1)) * 100).toFixed(1)}%`);
+  const shareEl = $('#top-entity-share');
+  if (shareEl) shareEl.title = `Dihitung dari ekuivalen IDR (1 USD = ${fmtNum(state.config.fxUsdIdr)} IDR).`;
+}
+
+/* --------------------------- satker / layanan / payer --------------------------- */
+function renderSatkerSection(metrics) {
+  setText('satker-kpi-1', fmtNum(metrics.satkers.length));
+  setText('satker-kpi-2', fmtIDR(metrics.satkers.length ? metrics.totalEq / metrics.satkers.length : 0, true));
+
+  const topEl = $('#satker-kpi-3');
+  if (topEl) {
+    topEl.textContent = metrics.satkers[0] ? metrics.satkers[0].name : '—';
+    topEl.title = topEl.textContent;
+  }
+
+  const inst = initChart('chart-satker-line');
+  if (inst) {
+    const top5 = metrics.satkers.slice(0, 5);
+    if (!top5.length) {
+      emptyChart(inst);
+    } else {
+      inst.clear();
+      inst.setOption({
+        tooltip: {
+          ...TOOLTIP,
+          formatter: (params) => {
+            const title = params[0] ? params[0].axisValue : '';
+            return `<b>${title}</b><br>${params.map((p) => `${p.marker} ${esc(p.seriesName)}: ${fmtIDR(p.value)}`).join('<br>')}`;
+          },
+        },
+        legend: {
+          top: 0,
+          type: 'scroll',
+          textStyle: { fontSize: 9, color: '#64748b' },
+          itemWidth: 10,
+          itemHeight: 8,
+          data: top5.map((s) => (s.name.length > 22 ? s.name.slice(0, 22) + '…' : s.name)),
+        },
+        grid: { ...GRID, top: '20%', bottom: '14%' },
+        xAxis: {
+          type: 'category',
+          boundaryGap: false,
+          data: metrics.periods.map(fmtPeriodLabel),
+          axisLabel: { ...AXIS_LABEL, interval: metrics.periods.length > 14 ? 'auto' : 0, rotate: metrics.periods.length > 8 ? 30 : 0 },
+          axisLine: { lineStyle: { color: '#e2e8f0' } },
+          axisTick: { show: false },
+        },
+        yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+        color: top5.map((_, i) => colorFor(i)),
+        series: top5.map((satker) => ({
+          name: satker.name.length > 22 ? satker.name.slice(0, 22) + '…' : satker.name,
+          type: 'line',
+          smooth: false,
+          symbol: 'circle',
+          symbolSize: 5,
+          data: metrics.periods.map((key) => (satker.periods[key] || 0)),
+          lineStyle: { width: 2 },
+        })),
+      });
+    }
+  }
+}
+
+function renderLayananSection(metrics) {
+  setText('layanan-kpi-1', fmtNum(metrics.layanans.length));
+  const topEl = $('#layanan-kpi-2');
+  if (topEl) {
+    topEl.textContent = metrics.layanans[0] ? metrics.layanans[0].name : '—';
+    topEl.title = topEl.textContent;
+  }
+  setText('layanan-kpi-3', fmtNum(metrics.anomalies.length));
+
+  const inst = initChart('chart-layanan-bar');
+  if (!inst) return;
+  const top = metrics.layanans.slice(0, 10).reverse();
+  if (!top.length) { emptyChart(inst); return; }
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const item = top[params[0].dataIndex];
+        return `<b>${esc(item.name)}</b><br>Setoran (ekuivalen): ${fmtIDR(item.eq)}<br>
+          IDR: ${fmtIDR(item.idr)}<br>USD: ${fmtUSD(item.usd)}<br>Transaksi: ${fmtNum(item.count)}`;
+      },
+    },
+    grid: { top: '4%', left: '2%', right: '8%', bottom: '4%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    yAxis: {
+      type: 'category',
+      data: top.map((s) => (s.name.length > 30 ? s.name.slice(0, 30) + '…' : s.name)),
+      axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 190, overflow: 'truncate' },
+      axisTick: { show: false },
+      axisLine: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      data: top.map((s, i) => ({ value: s.eq, itemStyle: { color: colorFor(i) } })),
+      barMaxWidth: 16,
+      itemStyle: { borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtIDR(p.value, true) },
+    }],
+  });
+}
+
+function renderPayerSection(metrics) {
+  setText('payer-kpi-1', fmtNum(metrics.payers.length));
+  const topEl = $('#payer-kpi-2');
+  if (topEl) {
+    topEl.textContent = metrics.payers[0] ? metrics.payers[0].name : '—';
+    topEl.title = topEl.textContent;
+  }
+  setText('payer-kpi-3', `${metrics.concentration.toFixed(1)}%`);
+
+  const inst = initChart('chart-payer-pie');
+  if (!inst) return;
+  const top = metrics.payers.slice(0, 7);
+  if (!top.length) { emptyChart(inst); return; }
+
+  const data = top.map((p) => ({ name: p.name, value: p.eq }));
+  const rest = metrics.payers.slice(7).reduce((sum, p) => sum + p.eq, 0);
+  if (rest > 0) data.push({ name: 'Lainnya', value: rest });
+
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(255,255,255,.97)',
+      borderColor: '#e2e8f0',
+      textStyle: { color: '#0f172a', fontSize: 11 },
+      formatter: (p) => `${esc(p.name)}<br>${fmtIDR(p.value)} (${p.percent}%)`,
+    },
+    legend: {
+      type: 'scroll',
+      orient: 'vertical',
+      right: 4,
+      top: 'middle',
+      bottom: 8,
+      textStyle: { fontSize: 9 },
+      itemWidth: 8,
+      itemHeight: 8,
+      formatter: (name) => (name.length > 22 ? name.slice(0, 22) + '…' : name),
+    },
+    color: ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#DC2626', '#cbd5e1'],
+    series: [{
+      type: 'pie',
+      radius: ['42%', '68%'],
+      center: ['34%', '50%'],
+      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 11, fontWeight: 'bold', formatter: '{b}\n{d}%' } },
+      data,
+    }],
+  });
+}
+
+/* ----------------------------------------------------------------------------
+ * 10. TABEL DENGAN PAGINASI
+ * --------------------------------------------------------------------------*/
+class PagedTable {
+  constructor({ tbody, pagination, info = null, pageSize = 10, columns = 3 }) {
+    this.tbody = document.getElementById(tbody);
+    this.pagination = document.getElementById(pagination);
+    this.info = info ? document.getElementById(info) : null;
+    this.pageSize = pageSize;
+    this.columns = columns;
+    this.rows = [];
+    this.renderer = () => '';
+    this.page = 1;
+
+    if (this.pagination && !this.pagination.dataset.bound) {
+      this.pagination.dataset.bound = '1';
+      this.pagination.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-page]');
+        if (!btn || !this.pagination.contains(btn)) return;
+        const next = Number(btn.dataset.page);
+        if (!Number.isFinite(next)) return;
+        this.page = next;
+        this.render();
+      });
+    }
+  }
+
+  setRows(rows, renderer) {
+    this.rows = rows || [];
+    if (renderer) this.renderer = renderer;
+    this.page = 1;
+    this.render();
+  }
+
+  render() {
+    if (!this.tbody) return;
+    const total = this.rows.length;
+    const pages = Math.max(1, Math.ceil(total / this.pageSize));
+    this.page = Math.min(Math.max(1, this.page), pages);
+    const start = (this.page - 1) * this.pageSize;
+    const slice = this.rows.slice(start, start + this.pageSize);
+
+    this.tbody.innerHTML = slice.length
+      ? slice.map((row, i) => this.renderer(row, start + i)).join('')
+      : `<tr><td colspan="${this.columns}" class="p-5 text-center text-gray-400">Tidak ada data pada filter ini</td></tr>`;
+
+    if (this.info) {
+      this.info.textContent = total
+        ? `Menampilkan ${fmtNum(start + 1)}–${fmtNum(Math.min(start + this.pageSize, total))} dari ${fmtNum(total)} baris`
+        : 'Tidak ada baris';
+    }
+
+    if (!this.pagination) return;
+    if (pages <= 1) {
+      this.pagination.innerHTML = `<span>${fmtNum(total)} baris</span><span></span>`;
+      return;
+    }
+
+    const btn = (page, label, disabled = false, active = false) =>
+      `<button data-page="${page}" ${disabled ? 'disabled' : ''}
+        class="px-2 py-1 mx-0.5 text-xs rounded transition ${active
+    ? 'bg-[#0000CD] text-white'
+    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}">${label}</button>`;
+
+    const windowStart = Math.max(1, this.page - 1);
+    const windowEnd = Math.min(pages, this.page + 1);
+    let numbers = '';
+    if (windowStart > 1) numbers += btn(1, '1') + (windowStart > 2 ? '<span class="px-1 text-gray-400">…</span>' : '');
+    for (let i = windowStart; i <= windowEnd; i += 1) numbers += btn(i, String(i), false, i === this.page);
+    if (windowEnd < pages) numbers += (windowEnd < pages - 1 ? '<span class="px-1 text-gray-400">…</span>' : '') + btn(pages, String(pages));
+
+    this.pagination.innerHTML = `
+      <span class="text-xs text-gray-500">${fmtNum(total)} baris</span>
+      <div class="flex items-center flex-wrap gap-0.5">
+        ${btn(this.page - 1, '‹', this.page === 1)}
+        ${numbers}
+        ${btn(this.page + 1, '›', this.page === pages)}
+      </div>`;
+  }
+}
+
+const tables = {};
+
+function ensureTables() {
+  if (!tables.transactions) {
+    tables.transactions = new PagedTable({
+      tbody: 'table-body', pagination: 'table-pagination', info: 'table-info', pageSize: 10, columns: 6,
+    });
+  }
+  if (!tables.satker) {
+    tables.satker = new PagedTable({ tbody: 'satker-tbody', pagination: 'satker-pagination', pageSize: 10, columns: 3 });
+  }
+  if (!tables.layanan) {
+    tables.layanan = new PagedTable({ tbody: 'layanan-tbody', pagination: 'layanan-pagination', pageSize: 10, columns: 3 });
+  }
+  if (!tables.payer) {
+    tables.payer = new PagedTable({ tbody: 'payer-tbody', pagination: 'payer-pagination', pageSize: 10, columns: 3 });
+  }
+}
+
+const amountCell = (item) => {
+  if (item.idr > 0 && item.usd > 0) {
+    return `<div class="text-[#228B22]">${esc(fmtIDR(item.idr, true))}</div>
+            <div class="text-[#0000CD] text-[10px]">${esc(fmtUSD(item.usd, true))}</div>`;
+  }
+  if (item.usd > 0) return `<span class="text-[#0000CD]">${esc(fmtUSD(item.usd))}</span>`;
+  if (item.other > 0) return `<span class="text-gray-600">${esc(fmtNum(item.other))} (lain)</span>`;
+  return `<span class="text-[#228B22]">${esc(fmtIDR(item.idr))}</span>`;
+};
+
+function renderTables(metrics) {
+  ensureTables();
+
+  const sortedRows = metrics.rows.slice().sort((a, b) => {
+    const da = a.date ? a.date.getTime() : -1;
+    const db = b.date ? b.date.getTime() : -1;
+    if (db !== da) return db - da;
+    return b.amount - a.amount;
+  });
+
+  tables.transactions.setRows(sortedRows, (row) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-4 py-2.5">
+        <span class="truncate-cell font-medium text-gray-900" title="${esc(row.payer)}">${esc(row.payer || '—')}</span>
+        <span class="truncate-cell text-[10px] text-gray-400" title="${esc(row.keterangan)}">${esc(row.keterangan || '—')}</span>
+      </td>
+      <td class="px-4 py-2.5 text-xs text-gray-600 whitespace-nowrap">${esc(row.dateISO ? fmtDateShort(row.dateISO) : (row.dateRaw || '—'))}</td>
+      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.satker)}">${esc(row.satker || '—')}</span></td>
+      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.layanan)}">${esc(row.layanan || '—')}</span></td>
+      <td class="px-4 py-2.5"><span class="chip chip-muted">${esc(row.akun || '—')}</span></td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <span class="font-semibold text-xs ${row.currency === 'USD' ? 'text-[#0000CD]' : 'text-[#228B22]'}">${esc(fmtAmount(row.amount, row.currency))}</span>
+        <span class="block text-[9px] text-gray-400">${esc(row.currency)}</span>
+      </td>
+    </tr>`);
+
+  tables.satker.setRows(metrics.satkers, (item) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
+      <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
+      <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
+    </tr>`);
+
+  tables.layanan.setRows(metrics.layanans, (item) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
+      <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
+      <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
+    </tr>`);
+
+  tables.payer.setRows(metrics.payers, (item) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
+      <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
+      <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
+    </tr>`);
+}
+
+/* ----------------------------------------------------------------------------
+ * 11. KUALITAS DATA
+ * --------------------------------------------------------------------------*/
+const SEVERITY = {
+  bad: { chip: 'chip-bad', label: 'Kritis', bar: 'bg-red-500', border: 'border-red-100 bg-red-50/60' },
+  warn: { chip: 'chip-warn', label: 'Perhatian', bar: 'bg-amber-500', border: 'border-amber-100 bg-amber-50/60' },
+  info: { chip: 'chip-muted', label: 'Info', bar: 'bg-slate-400', border: 'border-gray-100 bg-gray-50' },
+};
+
+function renderQuality(metrics) {
+  const quality = metrics.quality;
+  if (!quality) return;
+
+  setText('quality-score', `${quality.score} / 100`);
+  setText('quality-caption', quality.checks.length
+    ? `${quality.checks.length} jenis temuan dari ${fmtNum(quality.total)} baris`
+    : `Tidak ada temuan dari ${fmtNum(quality.total)} baris`);
+
+  const bars = $('#quality-bars');
+  if (bars) {
+    bars.innerHTML = quality.checks.length
+      ? quality.checks.map((check) => {
+        const style = SEVERITY[check.severity] || SEVERITY.info;
+        return `<div>
+            <div class="flex justify-between text-[10px] text-gray-600 mb-0.5">
+              <span class="truncate pr-2" title="${esc(check.label)}">${esc(check.label)}</span>
+              <span class="font-bold num shrink-0">${fmtNum(check.count)}</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div class="h-full ${style.bar}" style="width:${Math.max(2, Math.min(100, check.pct)).toFixed(1)}%"></div>
+            </div>
+          </div>`;
+      }).join('')
+      : '<p class="text-[11px] text-green-700 bg-green-50 border border-green-100 rounded-lg p-2">Semua pemeriksaan lolos.</p>';
+  }
+
+  const list = $('#quality-list');
+  if (list) {
+    list.innerHTML = quality.checks.length
+      ? quality.checks.map((check) => {
+        const style = SEVERITY[check.severity] || SEVERITY.info;
+        const samples = check.samples.length
+          ? `<ul class="mt-1.5 space-y-0.5 text-[10px] text-gray-500">${check.samples.map((s) => `<li class="truncate" title="${esc(s)}">• ${esc(s)}</li>`).join('')}</ul>`
+          : '';
+        return `<div class="p-3 rounded-lg border ${style.border}">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="chip ${style.chip}">${style.label}</span>
+              <span class="font-bold text-gray-800">${esc(check.label)}</span>
+              <span class="ml-auto text-[10px] font-bold text-gray-600 num">${fmtNum(check.count)} baris · ${check.pct.toFixed(1)}%</span>
+            </div>
+            <p class="text-[11px] text-gray-600 mt-1.5 leading-relaxed">${esc(check.detail)}</p>
+            ${samples}
+            <p class="text-[11px] text-gray-700 mt-1.5 leading-relaxed"><span class="font-semibold">Saran:</span> ${esc(check.fix)}</p>
+          </div>`;
+      }).join('')
+      : '<p class="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg p-3">Tidak ada masalah kualitas data yang terdeteksi.</p>';
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 12. ASISTEN DATA (rule-based, tanpa model bahasa)
+ * --------------------------------------------------------------------------*/
+function pushChat(role, html) {
+  const log = $('#chat-log');
+  if (!log) return;
+  const wrapper = document.createElement('div');
+  wrapper.className = role === 'user'
+    ? 'bg-purple-100 text-purple-900 text-[11px] p-2.5 rounded-tl-lg rounded-bl-lg rounded-br-lg max-w-[90%] self-end ml-auto border border-purple-200 leading-relaxed'
+    : 'bg-gray-100 text-gray-700 text-[11px] p-2.5 rounded-tr-lg rounded-bl-lg rounded-br-lg max-w-[90%] border border-gray-200 leading-relaxed';
+  wrapper.innerHTML = `<strong>${role === 'user' ? 'Anda' : 'Asisten'}:</strong> ${html}`;
+  log.appendChild(wrapper);
+  log.scrollTop = log.scrollHeight;
+}
+
+function answerQuery(query) {
+  const q = String(query || '').toLowerCase();
+  const m = state.metrics || computeMetrics(state.view, state.filter, state.config.fxUsdIdr);
+
+  const spot = (arr, index, mapFn) => (arr[index] ? mapFn(arr[index]) : '—');
+
+  if (/kualitas|quality|valid|error|duplikat|dobel|kosong|missing/.test(q)) {
+    const quality = m.quality || runQualityChecks(state.view, m);
+    if (!quality.checks.length) return 'Semua pemeriksaan kualitas data lolos. Tidak ada baris bermasalah yang terdeteksi.';
+    const top = quality.checks.slice(0, 3)
+      .map((c) => `<strong>${esc(c.label)}</strong> (${fmtNum(c.count)} baris)`)
+      .join(', ');
+    return `Skor kualitas data <strong>${quality.score}/100</strong>. Temuan terbesar: ${top}. Detail dan saran perbaikan ada di bagian Kualitas Data.`;
+  }
+
+  if (/anomali|aneh|outlier|lonjakan/.test(q)) {
+    if (!m.anomalies.length) return 'Tidak ada transaksi yang melewati ambang 3 standar deviasi pada filter saat ini.';
+    const top = m.anomalies[0];
+    return `Terdeteksi <strong>${m.anomalies.length}</strong> anomali. Terbesar: <strong>${esc(top.row.payer || '(tanpa nama)')}</strong> `
+      + `sebesar ${esc(fmtAmount(top.row.amount, top.row.currency))} pada ${esc(fmtDateShort(top.row.dateISO))} `
+      + `(z = ${top.z.toFixed(1)}).`;
+  }
+
+  if (/proyeksi|forecast|prediksi|bulan depan|tahun depan/.test(q)) {
+    const periods = m.periods.filter((key) => key !== 'Tanpa tanggal');
+    const values = periods.map((key) => (m.series[key] ? m.series[key].eq : 0));
+    const forecast = linearForecast(values, 1);
+    if (!forecast) return 'Data belum cukup (minimal 3 periode) untuk membuat proyeksi.';
+    const nextKey = nextPeriodKeys(periods[periods.length - 1], state.filter, 1)[0];
+    return `Proyeksi ${esc(fmtPeriodLabel(nextKey))}: <strong>${esc(fmtIDR(forecast.future[0].value))}</strong> `
+      + `(interval 95% ${esc(fmtIDR(forecast.future[0].lower, true))} – ${esc(fmtIDR(forecast.future[0].upper, true))}, R² ${forecast.r2.toFixed(2)}).`;
+  }
+
+  if (/tren|naik|turun|pertumbuhan|growth|banding/.test(q)) {
+    const periods = m.periods.filter((key) => key !== 'Tanpa tanggal');
+    if (periods.length < 2) return 'Butuh minimal 2 periode untuk membandingkan tren.';
+    const last = m.series[periods[periods.length - 1]].eq;
+    const prev = m.series[periods[periods.length - 2]].eq;
+    const growth = prev > 0 ? ((last - prev) / prev) * 100 : 0;
+    return `Setoran ${esc(fmtPeriodLabel(periods[periods.length - 1]))} sebesar <strong>${esc(fmtIDR(last))}</strong>, `
+      + `${growth >= 0 ? 'naik' : 'turun'} <strong>${fmtPct(growth)}</strong> dibanding ${esc(fmtPeriodLabel(periods[periods.length - 2]))} (${esc(fmtIDR(prev))}).`;
+  }
+
+  if (/satker|stasiun|unit|balai/.test(q)) {
+    return `Ada <strong>${fmtNum(m.satkers.length)}</strong> satker pada filter ini. Teratas: `
+      + spot(m.satkers, 0, (s) => `<strong>${esc(s.name)}</strong> dengan ${esc(fmtIDR(s.eq))} dari ${fmtNum(s.count)} transaksi`) + '.';
+  }
+
+  if (/layanan|ntpn|tarif|produk/.test(q)) {
+    return `Ada <strong>${fmtNum(m.layanans.length)}</strong> jenis layanan. Teratas: `
+      + spot(m.layanans, 0, (s) => `<strong>${esc(s.name)}</strong> (${esc(fmtIDR(s.eq))})`) + '.';
+  }
+
+  if (/terbesar|tertinggi|top|paling besar|juara/.test(q)) {
+    return `Wajib bayar terbesar: `
+      + spot(m.payers, 0, (p) => `<strong>${esc(p.name)}</strong> — ${esc(fmtIDR(p.eq))} (${((p.eq / (m.totalEq || 1)) * 100).toFixed(1)}% dari total, ${fmtNum(p.count)} transaksi)`)
+      + '. Satker terbesar: ' + spot(m.satkers, 0, (s) => `<strong>${esc(s.name)}</strong>`) + '.';
+  }
+
+  if (/terkecil|terendah|paling kecil/.test(q)) {
+    const positive = m.payers.filter((p) => p.eq > 0);
+    const smallest = positive[positive.length - 1];
+    return smallest
+      ? `Kontributor terkecil (masih > 0): <strong>${esc(smallest.name)}</strong> — ${esc(fmtIDR(smallest.eq))}.`
+      : 'Tidak ada kontributor dengan nilai positif.';
+  }
+
+  if (/total|revenue|pendapatan|setoran|berapa/.test(q)) {
+    return `Total pada filter saat ini: <strong>${esc(fmtIDR(m.totalIdr))}</strong> (IDR) + `
+      + `<strong>${esc(fmtUSD(m.totalUsd))}</strong> (USD) = ${esc(fmtIDR(m.totalEq))} ekuivalen, `
+      + `dari ${fmtNum(m.count)} transaksi oleh ${fmtNum(m.entities)} wajib bayar.`;
+  }
+
+  return 'Saya menjawab berdasarkan data yang tampil. Coba kata kunci: <em>total</em>, <em>terbesar</em>, '
+    + '<em>tren</em>, <em>proyeksi</em>, <em>anomali</em>, <em>satker</em>, <em>layanan</em>, atau <em>kualitas data</em>.';
+}
+
+function handleChatSubmit(value) {
+  const input = $('#chat-input');
+  const text = (value != null ? value : (input ? input.value : '')).trim();
+  if (!text) return;
+  pushChat('user', esc(text));
+  if (input) input.value = '';
+  setTimeout(() => pushChat('assistant', answerQuery(text)), 220);
+}
+
+/* ----------------------------------------------------------------------------
+ * 13. EXPORT CSV
+ * --------------------------------------------------------------------------*/
+function downloadCsv(filename, header, rows) {
+  const cell = (value) => `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+  const csv = '\uFEFF' + [header, ...rows].map((row) => row.map(cell).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function exportTransactions() {
+  if (!state.view.length) {
+    toast('Tidak ada data untuk diekspor.');
+    return;
+  }
+  const header = [
+    'NAMA WAJIB BAYAR / SETOR', 'TANGGAL BAYAR', 'KODE KL/UNIT/SATKER', 'NTPN (layanan)',
+    'NTB/NTP', 'KODE PP', 'KODE TARIF', 'NOMINAL TARIF', 'VOLUME', 'MATA UANG',
+    'KODE AKUN', 'SETORAN PER AKUN', 'KETERANGAN',
+  ];
+  const rows = state.view.map((row) => [
+    row.payer, row.dateISO || row.dateRaw, row.satker, row.layanan, row.ntb, row.kodePP,
+    row.kodeTarif, row.nominalTarif, row.volume, row.currency, row.akun, row.amount, row.keterangan,
+  ]);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadCsv(`pnbp-transaksi-${stamp}.csv`, header, rows);
+  toast(`${fmtNum(rows.length)} baris diekspor.`);
+}
+
+function exportQuality() {
+  const quality = state.metrics && state.metrics.quality;
+  if (!quality || !quality.checks.length) {
+    toast('Tidak ada temuan untuk diekspor.');
+    return;
+  }
+  const header = ['TEMUAN', 'TINGKAT', 'JUMLAH BARIS', 'PERSEN', 'DETAIL', 'SARAN', 'CONTOH'];
+  const rows = quality.checks.map((check) => [
+    check.label,
+    (SEVERITY[check.severity] || SEVERITY.info).label,
+    check.count,
+    check.pct.toFixed(2) + '%',
+    check.detail,
+    check.fix,
+    check.samples.join(' | '),
+  ]);
+  downloadCsv(`pnbp-temuan-data-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
+}
+
+/* ----------------------------------------------------------------------------
+ * 14. RENDER UTAMA
+ * --------------------------------------------------------------------------*/
+function renderAll() {
+  const metrics = computeMetrics(state.view, state.filter, state.config.fxUsdIdr);
+  metrics.quality = runQualityChecks(state.view, metrics);
+  state.metrics = metrics;
+
+  renderSource(metrics);
+  renderBanner(metrics);
+  renderKpis(metrics);
+  renderForecast(metrics);
+  renderAnomalies(metrics);
+  renderTrend(metrics);
+  renderTopSatker(metrics);
+  renderAkun(metrics);
+  renderCumulative(metrics);
+  renderTopEntity(metrics);
+  renderTables(metrics);
+  renderSatkerSection(metrics);
+  renderLayananSection(metrics);
+  renderPayerSection(metrics);
+  renderQuality(metrics);
+  updateProfileCaption(metrics);
+}
+
+/* ----------------------------------------------------------------------------
+ * 15. EVENT BINDING & INISIALISASI
+ * --------------------------------------------------------------------------*/
+function openSettings() {
+  const dialog = $('#settings-dialog');
+  if (!dialog) return;
+  const cfg = state.config;
+  $('#cfg-endpoint').value = cfg.gasEndpoint || '';
+  $('#cfg-fx').value = cfg.fxUsdIdr;
+  $('#cfg-cache').value = cfg.cacheMinutes;
+  $('#cfg-snapshot').checked = !!cfg.useSnapshot;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+function saveSettings() {
+  const endpoint = ($('#cfg-endpoint').value || '').trim();
+  const fx = Number($('#cfg-fx').value) || DEFAULT_CONFIG.fxUsdIdr;
+  const cache = Number($('#cfg-cache').value);
+  const useSnapshot = $('#cfg-snapshot').checked;
+
+  if (endpoint && !/^https?:\/\//i.test(endpoint)) {
+    toast('Endpoint harus dimulai dengan https://');
+    return;
+  }
+
+  const next = {
+    ...state.config,
+    gasEndpoint: endpoint,
+    fxUsdIdr: fx > 0 ? fx : DEFAULT_CONFIG.fxUsdIdr,
+    cacheMinutes: Number.isFinite(cache) ? Math.max(0, cache) : DEFAULT_CONFIG.cacheMinutes,
+    useSnapshot,
+  };
+
+  state.config = next;
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(next)); } catch (e) { /* abaikan */ }
+  try { sessionStorage.removeItem(CACHE_KEY); } catch (e) { /* abaikan */ }
+
+  const dialog = $('#settings-dialog');
+  if (dialog && dialog.open) dialog.close();
+  loadData({ force: true });
+}
+
+function bindEvents() {
+  // Navigasi + scroll spy
+  const menuItems = $$('.menu-item');
+  menuItems.forEach((item) => {
+    item.addEventListener('click', () => {
+      const target = document.getElementById(item.dataset.target);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  const mainArea = $('#main-scroll-area');
+  if ('IntersectionObserver' in window && mainArea) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        menuItems.forEach((item) => item.classList.toggle('active', item.dataset.target === entry.target.id));
+      });
+    }, { root: mainArea, rootMargin: '-35% 0px -55% 0px', threshold: 0 });
+    ['section-overview', 'section-satker', 'section-layanan', 'section-payer', 'section-quality']
+      .forEach((id) => { const el = document.getElementById(id); if (el) observer.observe(el); });
+  }
+
+  // Pencarian (debounce agar chart tidak dirender tiap ketikan)
+  const search = $('#global-search');
+  if (search) search.addEventListener('input', debounce((event) => updateSearch(event.target.value), 220));
+
+  // Filter periode
+  $$('.filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('.filter-btn').forEach((other) => {
+        other.classList.remove('bg-[#0000CD]/10', 'text-[#0000CD]');
+        other.classList.add('text-gray-600', 'hover:bg-gray-50');
+      });
+      btn.classList.add('bg-[#0000CD]/10', 'text-[#0000CD]');
+      btn.classList.remove('text-gray-600', 'hover:bg-gray-50');
+      setFilter(btn.dataset.filter);
+    });
+  });
+
+  // Filter mata uang
+  const currencyFilter = $('#table-currency-filter');
+  if (currencyFilter) {
+    currencyFilter.addEventListener('change', (event) => {
+      state.currency = event.target.value;
+      applyView();
+    });
+  }
+
+  // Export
+  const exportBtn = $('#export-btn');
+  if (exportBtn) exportBtn.addEventListener('click', exportTransactions);
+  const qualityExport = $('#quality-export');
+  if (qualityExport) qualityExport.addEventListener('click', exportQuality);
+
+  // Muat ulang
+  const reload = (force) => loadData({ force: force !== false });
+  ['#refresh-btn', '#rs-reload'].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.addEventListener('click', () => reload(true));
+  });
+
+  // Panel kanan
+  const right = $('#right-sidebar');
+  let rightOpen = true;
+  const applyRight = () => {
+    if (!right) return;
+    right.style.display = rightOpen ? '' : 'none';
+    setTimeout(() => Object.values(charts).forEach((chart) => chart && !chart.isDisposed() && chart.resize()), 320);
+  };
+  const toggle = $('#toggle-sidebar');
+  if (toggle) toggle.addEventListener('click', () => { rightOpen = !rightOpen; applyRight(); });
+
+  // Cetak
+  const print = $('#theme-print');
+  if (print) print.addEventListener('click', () => window.print());
+
+  // Skala tren
+  const scaleBtn = $('#trend-scale-btn');
+  if (scaleBtn) {
+    scaleBtn.addEventListener('click', () => {
+      state.trendLog = !state.trendLog;
+      scaleBtn.textContent = 'Skala: ' + (state.trendLog ? 'Log' : 'Linear');
+      if (state.metrics) renderTrend(state.metrics);
+    });
+  }
+
+  // Pengaturan
+  ['#open-settings', '#open-settings-rail'].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.addEventListener('click', openSettings);
+  });
+  const save = $('#cfg-save');
+  if (save) save.addEventListener('click', saveSettings);
+  const reset = $('#cfg-reset');
+  if (reset) {
+    reset.addEventListener('click', () => {
+      try { localStorage.removeItem(CONFIG_KEY); } catch (e) { /* abaikan */ }
+      state.config = { ...DEFAULT_CONFIG };
+      openSettings();
+      toast('Pengaturan dikembalikan ke default. Klik Simpan untuk menerapkan.');
+    });
+  }
+
+  // Chat
+  const send = $('#chat-send');
+  if (send) send.addEventListener('click', () => handleChatSubmit());
+  const input = $('#chat-input');
+  if (input) {
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); handleChatSubmit(); }
+    });
+  }
+  $$('.chat-chip').forEach((chip) => {
+    chip.addEventListener('click', () => handleChatSubmit(chip.textContent));
+  });
+}
+
+function boot() {
+  bindEvents();
+  ensureTables();
+  renderAll();
+  loadData();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * 16. DATA DEMO
+ * Dipakai hanya bila tidak ada sumber live/snapshot. Nilai di bawah adalah
+ * contoh (bukan data resmi) agar tampilan tetap bisa dievaluasi.
+ * --------------------------------------------------------------------------*/
+const DEMO_ROWS = [
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-01-07',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '7.62E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '10507086.25',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '420283.45',
+    'KETERANGAN': 'PNBP BMKG USD Okt 2025',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-01-15',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '4.01E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '12055866.75',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '482234.67',
+    'KETERANGAN': 'PNBP BMKG USD November 2025',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-02-13',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '8.80E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '11494005.75',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '459760.23',
+    'KETERANGAN': 'PNBP BMKG USD Desember 2025',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-03-12',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '6.15E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '12000000',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '480000.00',
+    'KETERANGAN': 'PNBP BMKG USD Januari 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-02-27',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '5.84E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '13400684.25',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '536027.37',
+    'KETERANGAN': 'PNBP BMKG USD Januari 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
+    'TANGGAL BAYAR': '2026-04-16',
+    'KODE KL/UNIT/SATKER': '436766 - SEKRETARIAT UTAMA BMKG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Cuaca untuk Penerbangan',
+    'NTB/NTP': '2.39E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '3',
+    'NOMINAL TARIF': '0.04',
+    'VOLUME': '11421853',
+    'MATA UANG': 'USD',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '456874.12',
+    'KETERANGAN': 'PNBP BMKG USD Februari 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'Stasiun Meteorologi Balikpapan',
+    'TANGGAL BAYAR': '2026-01-01',
+    'KODE KL/UNIT/SATKER': '437174 - STASIUN METEOROLOGI SULTAN AJI MUHAMMAD SULAIMAN SEPINGGAN',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.51E+11',
+    'NTPN': 'Informasi Tabular dan Grafik Maritim',
+    'NTB/NTP': '8.06E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '38',
+    'NOMINAL TARIF': '350000',
+    'VOLUME': '2',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '700000',
+    'KETERANGAN': 'CV FAJAR NUR JAYA NOVEMBER DAN DESEMBER 2025',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'Stasiun Klimatologi Lampung',
+    'TANGGAL BAYAR': '2026-01-02',
+    'KODE KL/UNIT/SATKER': '663839 - STASIUN KLIMATOLOGI LAMPUNG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Meteorologi Khusus Untuk Pendukung Kegiatan Proyek, Survei dan Penelitian Komersial',
+    'NTB/NTP': '2.60E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '76',
+    'NOMINAL TARIF': '3750000',
+    'VOLUME': '1',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '3750000',
+    'KETERANGAN': 'Permohonan Prakiraan Informasi Iklim Pekerjaan Pembangunan SPPG di Ds. Pekon Balak, Kec. Wonosobo, Kab. Tanggamus',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'Bustan, S.Si, M.Sc,',
+    'TANGGAL BAYAR': '2026-01-02',
+    'KODE KL/UNIT/SATKER': '663843 - STASIUN KLIMATOLOGI NUSA TENGGARA BARAT',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.20E+16',
+    'NTPN': 'Informasi Meteorologi Khusus Untuk Pendukung Kegiatan Proyek, Survei dan Penelitian Komersial',
+    'NTB/NTP': '2.60E+16',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '76',
+    'NOMINAL TARIF': '3750000',
+    'VOLUME': '1',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '3750000',
+    'KETERANGAN': '',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. TRANS YEONG MARITIME',
+    'TANGGAL BAYAR': '2026-01-02',
+    'KODE KL/UNIT/SATKER': '663818 - STASIUN METEOROLOGI MARITIM KENDARI',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.23E+16',
+    'NTPN': 'Informasi Cuaca Untuk Pelabuhan',
+    'NTB/NTP': '9.79E+07',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '5',
+    'NOMINAL TARIF': '225000',
+    'VOLUME': '7',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '1575000',
+    'KETERANGAN': 'PT. TRANS YEONG MARITIME',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. INDOJAYAAGRINUSA',
+    'TANGGAL BAYAR': '2026-01-02',
+    'KODE KL/UNIT/SATKER': '436936 - STASIUN METEOROLOGI SULTAN ISKANDAR MUDA',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.25E+16',
+    'NTPN': 'Informasi Meteorologi (asuransi)',
+    'NTB/NTP': 'FT26002375R1',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '28',
+    'NOMINAL TARIF': '175000',
+    'VOLUME': '6',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '1050000',
+    'KETERANGAN': 'Penerbitan data cuaca 6 lokasi PT. Indojaya Agrinusa (Klaim Asuransi)',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. PELAYARAN NUSANTARA',
+    'TANGGAL BAYAR': '2026-02-04',
+    'KODE KL/UNIT/SATKER': '663800 - STASIUN METEOROLOGI MARITIM TANJUNG PERAK',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.28E+16',
+    'NTPN': 'Informasi Cuaca Untuk Pelabuhan',
+    'NTB/NTP': '2602041234567890',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '5',
+    'NOMINAL TARIF': '225000',
+    'VOLUME': '3',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '675000',
+    'KETERANGAN': 'Prakiraan cuaca pelabuhan Maret 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. SAWIT LESTARI',
+    'TANGGAL BAYAR': '2026-03-11',
+    'KODE KL/UNIT/SATKER': '663843 - STASIUN KLIMATOLOGI NUSA TENGGARA BARAT',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.31E+16',
+    'NTPN': 'Informasi Iklim untuk Perkebunan',
+    'NTB/NTP': '2603119988776655',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '72',
+    'NOMINAL TARIF': '1250000',
+    'VOLUME': '2',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '2500000',
+    'KETERANGAN': 'Analisis iklim perkebunan periode Q1 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. ASURANSI NUSANTARA',
+    'TANGGAL BAYAR': '2026-03-05',
+    'KODE KL/UNIT/SATKER': '436936 - STASIUN METEOROLOGI SULTAN ISKANDAR MUDA',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.33E+16',
+    'NTPN': 'Informasi Meteorologi (asuransi)',
+    'NTB/NTP': '2603051122334455',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '28',
+    'NOMINAL TARIF': '175000',
+    'VOLUME': '4',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '700000',
+    'KETERANGAN': 'Penerbitan surat keterangan cuaca 4 lokasi',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'PT. SAMUDRA LINE',
+    'TANGGAL BAYAR': '2026-04-02',
+    'KODE KL/UNIT/SATKER': '663818 - STASIUN METEOROLOGI MARITIM KENDARI',
+    'KODE BILLING': '8.20E+19',
+    'KODE BANK/POS': '5.36E+16',
+    'NTPN': 'Informasi Cuaca Untuk Pelabuhan',
+    'NTB/NTP': '2602041234567890',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '5',
+    'NOMINAL TARIF': '225000',
+    'VOLUME': '5',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '1125000',
+    'KETERANGAN': 'Informasi cuaca pelayaran April 2026',
+  },
+  {
+    'NAMA WAJIB BAYAR / SETOR': 'Perorangan - Nelayan Terdaftar',
+    'TANGGAL BAYAR': '2026-04-09',
+    'KODE KL/UNIT/SATKER': '663839 - STASIUN KLIMATOLOGI LAMPUNG',
+    'KODE BILLING': '8.20E+18',
+    'KODE BANK/POS': '5.39E+16',
+    'NTPN': 'Informasi Meteorologi Khusus Untuk Pendukung Kegiatan Proyek, Survei dan Penelitian Komersial',
+    'NTB/NTP': '2604095566778899',
+    'KODE PENERIMAAN': 'F',
+    'KODE PP': '2018047',
+    'KODE TARIF': '76',
+    'NOMINAL TARIF': '3750000',
+    'VOLUME': '1',
+    'MATA UANG': 'IDR',
+    'KODE AKUN': '425433',
+    'SETORAN PER AKUN': '3750000',
+    'KETERANGAN': 'Permohonan data iklim untuk penelitian',
+  },
+];
+
+/* ----------------------------------------------------------------------------
+ * 17. MULAI
+ * --------------------------------------------------------------------------*/
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
+
+</script>
+</body>
+</html>

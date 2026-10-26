@@ -9,6 +9,19 @@ Dashboard statis untuk membandingkan layanan pada PP 47/2018 dengan usulan RPP P
 - `data.js` — konfigurasi endpoint, parser CSV/gviz, pemetaan kolom, ekstraksi teks/tautan, tarif, hierarki, dan statistik.
 - `snapshot.json` — placeholder nonaktif; aplikasi tidak membaca snapshot atau cache browser.
 
+
+## Dashboard Pembayaran PNBP (GAS + GitHub Pages)
+
+Folder `pnbp-dashboard/` berisi dashboard terpisah untuk memantau setoran PNBP (bukan perbandingan tarif):
+
+- `pnbp-dashboard/index.html` — satu file HTML mandiri (Tailwind, ECharts, tanpa build).
+- `pnbp-dashboard/Code.gs` — backend Apps Script yang membaca spreadsheet dan menyajikan HTML/JSON/JSONP.
+- `pnbp-dashboard/data/latest.json` — snapshot contoh sebagai fallback.
+- `pnbp-dashboard/README.md` — langkah deploy GAS, pindah ke GitHub Pages, dan kontrak endpoint.
+- `docs/BRAINSTORM-PNBP.md` — ide analitik, temuan kualitas data, dan rencana kerja.
+
+Dashboard tersebut dapat dibuka dari URL `/exec` Apps Script maupun sebagai halaman statis GitHub Pages (`/pnbp-dashboard/`). Bila dibuka statis, data diambil dari endpoint GAS lewat JSONP; bila endpoint belum diatur, dashboard memakai snapshot lalu data contoh yang selalu diberi label.
+
 ## Menjalankan secara lokal
 
 Jalankan server statis dari direktori repo, lalu buka alamat server di browser. Contoh:
