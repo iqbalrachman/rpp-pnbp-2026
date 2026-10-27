@@ -1,5 +1,5 @@
 {
- "schemaVersion": 1,
+ "schemaVersion": 2,
  "rows": [
   {
    "NAMA WAJIB BAYAR / SETOR": "PERUM LPPNPI",
@@ -290,10 +290,87 @@
    "KETERANGAN": "Permohonan data iklim untuk penelitian"
   }
  ],
+ "targets": [
+  {
+   "label": "436766 - SEKRETARIAT UTAMA BMKG",
+   "satkerCode": "436766",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "USD",
+   "value": 9000000,
+   "source": "contoh"
+  },
+  {
+   "label": "437174 - STASIUN METEOROLOGI SULTAN AJI MUHAMMAD SULAIMAN SEPINGGAN",
+   "satkerCode": "437174",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 5000000,
+   "source": "contoh"
+  },
+  {
+   "label": "663839 - STASIUN KLIMATOLOGI LAMPUNG",
+   "satkerCode": "663839",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 8000000,
+   "source": "contoh"
+  },
+  {
+   "label": "663843 - STASIUN KLIMATOLOGI NUSA TENGGARA BARAT",
+   "satkerCode": "663843",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 12000000,
+   "source": "contoh"
+  },
+  {
+   "label": "663818 - STASIUN METEOROLOGI MARITIM KENDARI",
+   "satkerCode": "663818",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 6000000,
+   "source": "contoh"
+  },
+  {
+   "label": "436936 - STASIUN METEOROLOGI SULTAN ISKANDAR MUDA",
+   "satkerCode": "436936",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 4000000,
+   "source": "contoh"
+  },
+  {
+   "label": "663800 - STASIUN METEOROLOGI MARITIM TANJUNG PERAK",
+   "satkerCode": "663800",
+   "dimension": "satker",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 3000000,
+   "source": "contoh"
+  },
+  {
+   "label": "Seluruh satker",
+   "dimension": "total",
+   "period": "2026",
+   "currency": "IDR",
+   "value": 30000000,
+   "source": "contoh"
+  }
+ ],
  "meta": {
   "demo": true,
   "capturedAt": "2026-04-30T00:00:00.000Z",
   "source": "contoh",
-  "note": "Snapshot contoh agar dashboard tetap tampil tanpa backend. Ganti dengan data asli via GAS."
+  "note": "Snapshot CONTOH. Data asli hanya lewat Apps Script (sheet credential). Tidak ada konversi kurs."
+ },
+ "targetsMeta": {
+  "mode": "demo",
+  "note": "Target contoh untuk pratinjau; ganti dengan sheet TARGET di spreadsheet."
  }
 }

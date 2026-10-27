@@ -161,11 +161,12 @@
 
 <body class="flex w-full h-screen overflow-hidden text-gray-800 bg-gray-100">
 
+
 <!-- ====================== GLOBAL LOADER ====================== -->
 <div id="global-loader" class="loader-overlay">
   <div class="spinner mb-4"></div>
   <h2 class="text-lg font-semibold text-gray-800" id="loader-title">Menyiapkan dashboard…</h2>
-  <p class="text-sm text-gray-500 text-center max-w-sm mt-1" id="loader-text">Menghubungi sumber data</p>
+  <p class="text-sm text-gray-500 text-center max-w-sm mt-1" id="loader-text">Menghubungi Google Apps Script</p>
 </div>
 
 <!-- ====================== 1. SIDEBAR KIRI ====================== -->
@@ -178,10 +179,13 @@
     <button class="menu-item active" data-target="section-overview" title="Ringkasan" aria-label="Ringkasan">
       <i class="ph ph-squares-four text-2xl"></i>
     </button>
+    <button class="menu-item" data-target="section-target" title="Target vs Realisasi" aria-label="Target vs Realisasi">
+      <i class="ph ph-target text-2xl"></i>
+    </button>
     <button class="menu-item" data-target="section-satker" title="Satker / Unit" aria-label="Satker / Unit">
       <i class="ph ph-buildings text-2xl"></i>
     </button>
-    <button class="menu-item" data-target="section-layanan" title="Layanan / NTPN" aria-label="Layanan / NTPN">
+    <button class="menu-item" data-target="section-ntpn" title="NTPN" aria-label="NTPN">
       <i class="ph ph-barcode text-2xl"></i>
     </button>
     <button class="menu-item" data-target="section-payer" title="Wajib Bayar" aria-label="Wajib Bayar">
@@ -196,7 +200,7 @@
     <button id="theme-print" class="text-gray-400 hover:text-white transition p-2" title="Cetak / simpan PDF" aria-label="Cetak">
       <i class="ph ph-printer text-xl"></i>
     </button>
-    <button id="open-settings-rail" class="text-gray-400 hover:text-white transition p-2" title="Pengaturan sumber data" aria-label="Pengaturan sumber data">
+    <button id="open-settings-rail" class="text-gray-400 hover:text-white transition p-2" title="Pengaturan endpoint GAS" aria-label="Pengaturan">
       <i class="ph ph-gear text-xl"></i>
     </button>
   </div>
@@ -205,8 +209,7 @@
 <!-- ====================== MAIN ====================== -->
 <main class="main-content flex-1 flex flex-col overflow-y-auto relative h-full" id="main-scroll-area">
 
-  <!-- Header -->
-  <header class="flex flex-wrap gap-4 justify-between items-center px-5 lg:px-8 py-5 sticky top-0 bg-[#f3f4f6]/90 backdrop-blur-md z-20 border-b border-gray-200">
+  <header class="flex flex-wrap gap-3 justify-between items-center px-5 lg:px-8 py-5 sticky top-0 bg-[#f3f4f6]/90 backdrop-blur-md z-20 border-b border-gray-200">
     <div class="min-w-0">
       <h1 class="text-xl lg:text-2xl font-extrabold text-gray-900 tracking-tight">PEMBAYARAN PNBP</h1>
       <p class="text-[11px] lg:text-sm text-gray-500">BADAN METEOROLOGI, KLIMATOLOGI, DAN GEOFISIKA</p>
@@ -215,8 +218,8 @@
     <div class="flex flex-wrap items-center gap-2 lg:gap-3 no-print">
       <div class="relative">
         <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-        <input type="search" id="global-search" placeholder="Cari wajib bayar, satker, layanan…" autocomplete="off"
-          class="pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0000CD]/20 focus:border-[#0000CD] w-52 lg:w-72 shadow-sm transition-all">
+        <input type="search" id="global-search" placeholder="Cari wajib bayar, satker, NTPN…" autocomplete="off"
+          class="pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0000CD]/20 focus:border-[#0000CD] w-48 lg:w-64 shadow-sm transition-all">
       </div>
 
       <div class="flex bg-white rounded-lg p-1 border border-gray-200 shadow-sm" id="global-filter-container" role="group" aria-label="Periode agregasi">
@@ -225,7 +228,12 @@
         <button class="filter-btn px-3 py-1 text-xs rounded-md font-semibold text-gray-600 hover:bg-gray-50 transition-colors" data-filter="Year">Tahun</button>
       </div>
 
-      <button id="refresh-btn" class="p-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-colors text-gray-700" title="Muat ulang data" aria-label="Muat ulang data">
+      <div class="flex bg-white rounded-lg p-1 border border-gray-200 shadow-sm" id="value-view-toggle" role="group" aria-label="Mata uang tampilan">
+        <button class="value-btn px-3 py-1 text-xs rounded-md font-bold bg-[#228B22]/10 text-[#228B22] transition-colors" data-view="IDR">IDR</button>
+        <button class="value-btn px-3 py-1 text-xs rounded-md font-bold text-gray-600 hover:bg-gray-50 transition-colors" data-view="USD">USD</button>
+      </div>
+
+      <button id="refresh-btn" class="p-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-colors text-gray-700" title="Muat ulang data dari GAS" aria-label="Muat ulang data">
         <i class="ph ph-arrows-clockwise text-lg"></i>
       </button>
       <button id="toggle-sidebar" class="p-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 transition-colors text-gray-700" title="Sembunyikan panel kanan" aria-label="Sembunyikan panel kanan">
@@ -239,107 +247,116 @@
     <!-- ====================== RINGKASAN ====================== -->
     <div id="section-overview" class="flex flex-col gap-6 scroll-mt-28">
 
-      <!-- Banner utama -->
       <section class="w-full bg-gradient-to-r from-[#0000CD] to-[#228B22] rounded-2xl p-6 lg:p-8 text-white shadow-lg relative overflow-hidden">
         <div class="absolute -right-10 -top-10 w-64 h-64 border-[40px] border-white/10 rounded-full pointer-events-none"></div>
         <div class="absolute right-32 -bottom-20 w-48 h-48 border-[20px] border-white/5 rounded-full pointer-events-none"></div>
 
         <div class="relative z-10 flex flex-col xl:flex-row xl:items-end justify-between gap-6">
-          <div>
+          <div class="min-w-0">
             <div class="flex items-center gap-2 text-white/80 mb-2">
-              <i class="ph-fill ph-lightning"></i>
+              <i class="ph-fill ph-coins"></i>
               <span class="text-xs font-bold uppercase tracking-wider">Total setoran periode terpilih</span>
             </div>
-            <div class="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <div class="flex flex-wrap items-end gap-x-8 gap-y-3">
               <div>
-                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">IDR</p>
+                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">Rupiah (IDR)</p>
                 <h2 class="text-3xl lg:text-4xl font-extrabold leading-none num" id="insight-total-idr">Rp 0</h2>
+                <p class="text-[10px] text-white/60 mt-1" id="insight-count-idr">0 transaksi</p>
               </div>
-              <div class="hidden sm:block pb-1 text-white/40 text-2xl font-light">|</div>
+              <div class="hidden sm:block pb-2 text-white/30 text-2xl font-light">|</div>
               <div>
-                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">USD</p>
+                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">Dolar AS (USD)</p>
                 <h2 class="text-2xl lg:text-3xl font-bold leading-none text-white/95 num" id="insight-total-usd">$ 0</h2>
-              </div>
-              <div class="hidden sm:block pb-1 text-white/40 text-2xl font-light">|</div>
-              <div>
-                <p class="text-[10px] text-white/70 uppercase tracking-wider font-bold mb-1">Ekuivalen IDR</p>
-                <h2 class="text-xl lg:text-2xl font-bold leading-none text-white/90 num" id="insight-combined">Rp 0</h2>
+                <p class="text-[10px] text-white/60 mt-1" id="insight-count-usd">0 transaksi</p>
               </div>
             </div>
-            <p class="text-[10px] text-white/60 mt-2" id="insight-fx-note">Kurs asumsi untuk ekuivalen IDR: —</p>
+            <p class="text-[10px] text-white/70 mt-3 flex items-center gap-1.5">
+              <i class="ph ph-info"></i>
+              IDR dan USD dilaporkan terpisah — tidak ada konversi kurs di dashboard ini.
+            </p>
           </div>
 
-          <div class="flex items-center gap-2 text-[11px] bg-white/10 border border-white/20 rounded-lg px-3 py-2 backdrop-blur-sm">
-            <span class="src-dot bg-emerald-300" id="insight-source-dot"></span>
-            <span id="insight-source">Menunggu data</span>
+          <div class="flex flex-col items-start xl:items-end gap-2">
+            <div class="flex items-center gap-2 text-[11px] bg-white/10 border border-white/20 rounded-lg px-3 py-2 backdrop-blur-sm">
+              <span class="src-dot bg-emerald-300" id="insight-source-dot"></span>
+              <span id="insight-source">Menunggu data</span>
+            </div>
+            <p class="text-[10px] text-white/60" id="insight-period">Periode: —</p>
           </div>
         </div>
       </section>
 
-      <!-- KPI -->
-      <section class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        <div class="card card-pad relative overflow-hidden">
-          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+      <section class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div class="card card-pad">
+          <p class="text-[11px] font-medium text-gray-500 flex items-center justify-between gap-1">
+            Total IDR
+            <span class="p-1 bg-[#228B22]/10 rounded text-[#228B22]"><i class="ph ph-currency-circle-dollar"></i></span>
+          </p>
+          <h3 class="text-xl font-extrabold text-gray-900 mt-1 num" id="kpi-idr">Rp 0</h3>
+          <p class="text-[10px] text-gray-400 mt-1" id="kpi-idr-note">—</p>
+        </div>
+
+        <div class="card card-pad">
+          <p class="text-[11px] font-medium text-gray-500 flex items-center justify-between gap-1">
+            Total USD
+            <span class="p-1 bg-[#0000CD]/10 rounded text-[#0000CD]"><i class="ph ph-currency-dollar-simple"></i></span>
+          </p>
+          <h3 class="text-xl font-extrabold text-gray-900 mt-1 num" id="kpi-usd">$ 0</h3>
+          <p class="text-[10px] text-gray-400 mt-1" id="kpi-usd-note">—</p>
+        </div>
+
+        <div class="card card-pad">
+          <p class="text-[11px] font-medium text-gray-500 flex items-center justify-between gap-1">
             Transaksi
-            <span class="p-1.5 bg-[#0000CD]/10 rounded-lg text-[#0000CD]"><i class="ph ph-receipt"></i></span>
+            <span class="p-1 bg-gray-100 rounded text-gray-500"><i class="ph ph-receipt"></i></span>
           </p>
-          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-tx">0</h3>
-          <p class="text-[11px] text-gray-400 mt-1" id="kpi-tx-note">—</p>
+          <h3 class="text-xl font-extrabold text-gray-900 mt-1 num" id="kpi-tx">0</h3>
+          <p class="text-[10px] text-gray-400 mt-1" id="kpi-tx-note">—</p>
         </div>
 
-        <div class="card card-pad relative overflow-hidden">
-          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
+        <div class="card card-pad">
+          <p class="text-[11px] font-medium text-gray-500 flex items-center justify-between gap-1">
             Volume
-            <span class="p-1.5 bg-[#228B22]/10 rounded-lg text-[#228B22]"><i class="ph ph-stack"></i></span>
+            <span class="p-1 bg-gray-100 rounded text-gray-500"><i class="ph ph-stack"></i></span>
           </p>
-          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-vol">0</h3>
-          <p class="text-[11px] text-gray-400 mt-1" id="kpi-vol-note">—</p>
+          <h3 class="text-xl font-extrabold text-gray-900 mt-1 num" id="kpi-vol">0</h3>
+          <p class="text-[10px] text-gray-400 mt-1" id="kpi-vol-note">—</p>
         </div>
 
-        <div class="card card-pad relative overflow-hidden">
-          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
-            Rata-rata / transaksi
-            <span class="p-1.5 bg-gray-100 rounded-lg text-gray-500"><i class="ph ph-calculator"></i></span>
+        <div class="card card-pad">
+          <p class="text-[11px] font-medium text-gray-500 flex items-center justify-between gap-1">
+            Wajib bayar
+            <span class="p-1 bg-purple-100 rounded text-purple-700"><i class="ph ph-users-three"></i></span>
           </p>
-          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-avg">0</h3>
-          <p class="text-[11px] text-gray-400 mt-1" id="kpi-avg-note">—</p>
+          <h3 class="text-xl font-extrabold text-gray-900 mt-1 num" id="kpi-entities">0</h3>
+          <p class="text-[10px] text-gray-400 mt-1" id="kpi-entities-note">—</p>
         </div>
 
-        <div class="card card-pad relative overflow-hidden">
-          <p class="text-xs font-medium text-gray-500 flex items-center justify-between gap-2">
-            Wajib bayar unik
-            <span class="p-1.5 bg-purple-100 rounded-lg text-purple-700"><i class="ph ph-users-three"></i></span>
-          </p>
-          <h3 class="text-2xl font-extrabold text-gray-900 mt-1 num" id="kpi-entities">0</h3>
-          <p class="text-[11px] text-gray-400 mt-1" id="kpi-entities-note">—</p>
-        </div>
-
-        <div class="card card-pad relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 text-white col-span-2 lg:col-span-1">
-          <p class="text-xs font-medium text-gray-400 flex items-center justify-between gap-2">
+        <div class="card card-pad bg-gradient-to-br from-gray-800 to-gray-900 text-white">
+          <p class="text-[11px] font-medium text-gray-400 flex items-center justify-between gap-1">
             Satker aktif
-            <span class="p-1.5 bg-white/10 rounded-lg text-white"><i class="ph ph-buildings"></i></span>
+            <span class="p-1 bg-white/10 rounded text-white"><i class="ph ph-buildings"></i></span>
           </p>
-          <h3 class="text-2xl font-extrabold mt-1 num" id="kpi-satker">0</h3>
-          <p class="text-[11px] text-gray-400 mt-1" id="kpi-satker-note">—</p>
+          <h3 class="text-xl font-extrabold mt-1 num" id="kpi-satker">0</h3>
+          <p class="text-[10px] text-gray-400 mt-1 truncate" id="kpi-satker-note">—</p>
         </div>
       </section>
 
-      <!-- Forecast + Anomali -->
       <section class="flex flex-col xl:flex-row gap-5">
-        <div class="card card-pad flex-[7] flex flex-col min-h-[340px]">
+        <div class="card card-pad flex-[7] flex flex-col min-h-[360px]">
           <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
             <h3 class="text-base font-bold text-gray-800 flex items-center gap-2">
-              <i class="ph-fill ph-trend-up text-[#0000CD]"></i> Proyeksi Setoran
+              <i class="ph-fill ph-trend-up text-[#0000CD]"></i> Proyeksi Setoran (IDR &amp; USD terpisah)
             </h3>
             <span class="text-[10px] bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded font-bold flex items-center gap-1">
-              <i class="ph-fill ph-sparkle"></i> Regresi linear + interval prediksi
+              <i class="ph-fill ph-sparkle"></i> Regresi linear + interval 95%
             </span>
           </div>
-          <div id="chart-forecast" class="flex-1 w-full min-h-[240px]"></div>
-          <p class="text-[11px] text-gray-500 mt-2" id="forecast-note">—</p>
+          <div id="chart-forecast" class="flex-1 w-full min-h-[280px]"></div>
+          <p class="text-[11px] text-gray-500 mt-2 leading-relaxed" id="forecast-note">—</p>
         </div>
 
-        <div class="card card-pad flex-[3] flex flex-col relative overflow-hidden min-h-[340px]">
+        <div class="card card-pad flex-[3] flex flex-col relative overflow-hidden min-h-[360px]">
           <div class="absolute -right-4 -top-4 text-8xl text-red-50 opacity-70 pointer-events-none"><i class="ph-fill ph-warning-circle"></i></div>
           <h3 class="text-base font-bold text-gray-800 flex items-center gap-2 mb-3 relative z-10">
             <i class="ph-fill ph-warning-circle text-red-500"></i> Deteksi Anomali
@@ -347,35 +364,34 @@
           <div id="anomaly-list" class="relative z-10 flex-1 overflow-y-auto text-xs text-gray-600 space-y-2 pr-1">
             <p class="text-gray-500">Memindai transaksi…</p>
           </div>
-          <p class="text-[10px] text-gray-400 mt-2 relative z-10" id="anomaly-note">Ambang: |z| &gt; 3 per mata uang.</p>
+          <p class="text-[10px] text-gray-400 mt-2 relative z-10" id="anomaly-note">Ambang |z| &gt; 3, dihitung terpisah untuk IDR dan USD.</p>
         </div>
       </section>
 
-      <!-- Tren -->
       <section class="flex flex-col lg:flex-row gap-5">
-        <div class="card card-pad flex-[7] flex flex-col min-h-[360px]">
-          <div class="flex justify-between items-center mb-3 gap-2">
-            <h3 class="text-base font-semibold text-gray-800">Tren Setoran &amp; Volume</h3>
+        <div class="card card-pad flex-[7] flex flex-col min-h-[380px]">
+          <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+            <h3 class="text-base font-semibold text-gray-800">Tren Setoran per Periode</h3>
             <button id="trend-scale-btn" class="text-[10px] font-bold px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50" title="Ubah skala sumbu Y">Skala: Linear</button>
           </div>
-          <div id="chart-trend" class="flex-1 w-full min-h-[280px]"></div>
+          <div id="chart-trend" class="flex-1 w-full min-h-[300px]"></div>
         </div>
 
-        <div class="card card-pad flex-[3] flex flex-col min-h-[360px]">
-          <h3 class="text-base font-semibold text-gray-800 mb-3">Kekuatan Satker</h3>
-          <div id="chart-top-satker" class="flex-1 w-full min-h-[260px]"></div>
+        <div class="card card-pad flex-[3] flex flex-col min-h-[380px]">
+          <h3 class="text-base font-semibold text-gray-800 mb-1">Satker Teratas</h3>
+          <p class="text-[10px] text-gray-400 mb-2" id="top-satker-caption">—</p>
+          <div id="chart-top-satker" class="flex-1 w-full min-h-[280px]"></div>
         </div>
       </section>
 
-      <!-- Top entity + komposisi -->
       <section class="flex flex-col lg:flex-row gap-5">
         <div class="card card-pad flex-[3] flex flex-col h-[340px]">
-          <h3 class="text-base font-semibold text-gray-800 mb-2">Komposisi Kode Akun (IDR)</h3>
+          <h3 class="text-base font-semibold text-gray-800 mb-2">Komposisi Kode Akun</h3>
           <div id="chart-akun" class="flex-1 w-full h-full"></div>
         </div>
 
         <div class="card card-pad flex-[3] flex flex-col h-[340px]">
-          <h3 class="text-base font-semibold text-gray-800 mb-2">Kumulatif Setoran (ekuivalen IDR)</h3>
+          <h3 class="text-base font-semibold text-gray-800 mb-2">Kumulatif Setoran</h3>
           <div id="chart-cumulative" class="flex-1 w-full h-full"></div>
         </div>
 
@@ -384,22 +400,22 @@
           <div class="bg-[#f8fafc] rounded-xl p-5 flex-1 flex flex-col justify-center relative overflow-hidden border border-gray-100">
             <div class="absolute right-0 top-0 text-8xl text-gray-200/60 -translate-y-4 translate-x-3 pointer-events-none"><i class="ph-fill ph-trophy"></i></div>
             <div class="relative z-10">
-              <span class="chip chip-ok mb-3">#1 SETORAN TERBESAR</span>
+              <span class="chip chip-ok mb-3" id="top-entity-chip">#1 SETORAN TERBESAR</span>
               <h4 class="text-lg font-extrabold text-gray-900 mb-1 truncate" id="top-entity-name" title="">—</h4>
               <p class="text-xs text-gray-500 mb-4 truncate" id="top-entity-satker">—</p>
 
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <p class="text-[11px] text-gray-500">Kontribusi IDR</p>
-                  <p class="text-base font-bold text-[#0000CD] num" id="top-entity-idr">Rp 0</p>
+                  <p class="text-sm font-bold text-[#228B22] num" id="top-entity-idr">Rp 0</p>
                   <p class="text-[11px] text-gray-500 mt-2">Kontribusi USD</p>
-                  <p class="text-sm font-bold text-[#228B22] num" id="top-entity-usd">$ 0</p>
+                  <p class="text-sm font-bold text-[#0000CD] num" id="top-entity-usd">$ 0</p>
                 </div>
                 <div>
                   <p class="text-[11px] text-gray-500">Transaksi</p>
                   <p class="text-base font-bold text-gray-800 num" id="top-entity-tx">0</p>
-                  <p class="text-[11px] text-gray-500 mt-2">Porsi setoran</p>
-                  <p class="text-base font-bold text-gray-800 num" id="top-entity-share">0%</p>
+                  <p class="text-[11px] text-gray-500 mt-2">Porsi (IDR / USD)</p>
+                  <p class="text-xs font-bold text-gray-800 num" id="top-entity-share">0% / 0%</p>
                 </div>
               </div>
             </div>
@@ -407,7 +423,6 @@
         </div>
       </section>
 
-      <!-- Tabel transaksi -->
       <section class="card overflow-hidden flex flex-col">
         <div class="p-5 border-b border-gray-100 flex flex-wrap justify-between items-center gap-3 bg-white">
           <div>
@@ -429,15 +444,15 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="fixed text-left text-sm min-w-[720px]">
+          <table class="fixed text-left text-sm min-w-[760px]">
             <thead class="bg-gray-50 text-gray-500 font-medium text-xs">
               <tr>
-                <th class="px-4 py-2.5 w-[22%]">Wajib Bayar</th>
+                <th class="px-4 py-2.5 w-[20%]">Wajib Bayar</th>
                 <th class="px-4 py-2.5 w-[11%]">Tanggal</th>
                 <th class="px-4 py-2.5 w-[18%]">Satker</th>
-                <th class="px-4 py-2.5 w-[20%]">Layanan / NTPN</th>
-                <th class="px-4 py-2.5 w-[11%]">Akun</th>
-                <th class="px-4 py-2.5 w-[18%] text-right">Setoran</th>
+                <th class="px-4 py-2.5 w-[21%]">NTPN</th>
+                <th class="px-4 py-2.5 w-[10%]">Akun</th>
+                <th class="px-4 py-2.5 w-[20%] text-right">Setoran</th>
               </tr>
             </thead>
             <tbody id="table-body" class="divide-y divide-gray-100 text-gray-700">
@@ -449,13 +464,76 @@
       </section>
     </div>
 
+    <!-- ====================== TARGET VS REALISASI ====================== -->
+    <section id="section-target" class="flex flex-col gap-4 mt-6 scroll-mt-28">
+      <div class="flex flex-wrap items-end justify-between gap-2">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <i class="ph-fill ph-target text-[#DC2626]"></i> Target vs Realisasi
+        </h3>
+        <span class="chip chip-muted" id="target-source-chip">Menunggu data target</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Target terdeteksi</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="target-kpi-1">0</h4>
+          <p class="text-[10px] text-gray-400 mt-1" id="target-kpi-1-note">—</p>
+        </div>
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Capaian agregat (mata uang terpilih)</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="target-kpi-2">—</h4>
+          <p class="text-[10px] text-gray-400 mt-1" id="target-kpi-2-note">—</p>
+        </div>
+        <div class="card card-pad">
+          <p class="text-xs text-gray-500">Selisih terhadap target</p>
+          <h4 class="text-xl font-extrabold num mt-1" id="target-kpi-3">—</h4>
+          <p class="text-[10px] text-gray-400 mt-1" id="target-kpi-3-note">—</p>
+        </div>
+      </div>
+
+      <div class="flex flex-col xl:flex-row gap-4">
+        <div class="card card-pad flex-[6] flex flex-col min-h-[400px]">
+          <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+            <h4 class="text-sm font-semibold">Target vs Realisasi per Satker</h4>
+            <span class="text-[10px] text-gray-500" id="target-chart-caption">—</span>
+          </div>
+          <div id="chart-target" class="flex-1 w-full min-h-[320px]"></div>
+          <p class="text-[11px] text-gray-500 mt-2 leading-relaxed" id="target-method-note">—</p>
+        </div>
+
+        <div class="card card-pad flex-[4] flex flex-col min-h-[400px]">
+          <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+            <h4 class="text-sm font-semibold">Rincian Target</h4>
+            <button id="target-export" class="text-[10px] font-bold px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 no-print">
+              <i class="ph ph-file-csv"></i> CSV
+            </button>
+          </div>
+          <div class="overflow-y-auto flex-1" style="max-height:360px">
+            <table class="fixed text-left text-xs">
+              <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+                <tr>
+                  <th class="p-2.5 w-[30%]">TARGET / UNIT</th>
+                  <th class="p-2.5 w-[14%]">Periode</th>
+                  <th class="p-2.5 w-[16%] text-right">Target</th>
+                  <th class="p-2.5 w-[16%] text-right">Realisasi</th>
+                  <th class="p-2.5 w-[12%] text-right">Capaian</th>
+                  <th class="p-2.5 w-[12%]">Status</th>
+                </tr>
+              </thead>
+              <tbody id="target-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
+            </table>
+          </div>
+          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="target-pagination"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ====================== ANALITIK ====================== -->
     <div class="mt-8 flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 pb-2">
       <h2 class="text-xl lg:text-2xl font-extrabold text-gray-900">Profil Data &amp; Analitik</h2>
       <p class="text-xs text-gray-500" id="profile-caption">—</p>
     </div>
 
-    <!-- 1. SATKER -->
     <section id="section-satker" class="flex flex-col gap-4 scroll-mt-28">
       <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
         <i class="ph-fill ph-buildings text-[#228B22]"></i> Satker / Unit
@@ -467,7 +545,7 @@
           <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="satker-kpi-1">0</h4>
         </div>
         <div class="card card-pad">
-          <p class="text-xs text-gray-500">Rata-rata setoran per satker</p>
+          <p class="text-xs text-gray-500">Rata-rata per satker (IDR)</p>
           <h4 class="text-xl font-extrabold text-[#228B22] num mt-1" id="satker-kpi-2">Rp 0</h4>
         </div>
         <div class="card card-pad">
@@ -477,14 +555,17 @@
       </div>
 
       <div class="flex flex-col xl:flex-row gap-4">
-        <div class="card card-pad flex-[6] flex flex-col min-h-[380px]">
-          <h4 class="text-sm font-semibold mb-2">Tren 5 Satker Teratas (ekuivalen IDR)</h4>
-          <div id="chart-satker-line" class="flex-1 w-full min-h-[300px]"></div>
+        <div class="card card-pad flex-[6] flex flex-col min-h-[400px]">
+          <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+            <h4 class="text-sm font-semibold">Tren 5 Satker Teratas</h4>
+            <span class="text-[10px] text-gray-500" id="satker-chart-caption">—</span>
+          </div>
+          <div id="chart-satker-line" class="flex-1 w-full min-h-[320px]"></div>
         </div>
 
-        <div class="card card-pad flex-[4] flex flex-col min-h-[380px]">
+        <div class="card card-pad flex-[4] flex flex-col min-h-[400px]">
           <h4 class="text-sm font-semibold mb-2">Rincian Satker</h4>
-          <div class="overflow-y-auto flex-1" style="max-height:340px">
+          <div class="overflow-y-auto flex-1" style="max-height:360px">
             <table class="fixed text-left text-xs">
               <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
                 <tr>
@@ -501,54 +582,54 @@
       </div>
     </section>
 
-    <!-- 2. LAYANAN / NTPN -->
-    <section id="section-layanan" class="flex flex-col gap-4 mt-6 scroll-mt-28">
+    <section id="section-ntpn" class="flex flex-col gap-4 mt-6 scroll-mt-28">
       <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-        <i class="ph-fill ph-barcode text-[#0000CD]"></i> Layanan &amp; NTPN
+        <i class="ph-fill ph-barcode text-[#0000CD]"></i> NTPN
+        <span class="text-[10px] font-semibold text-gray-500 bg-gray-100 border border-gray-200 rounded px-2 py-0.5">apa adanya</span>
       </h3>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="card card-pad">
-          <p class="text-xs text-gray-500">Jenis layanan unik</p>
-          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="layanan-kpi-1">0</h4>
+          <p class="text-xs text-gray-500">Nilai NTPN unik</p>
+          <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="ntpn-kpi-1">0</h4>
         </div>
         <div class="card card-pad">
-          <p class="text-xs text-gray-500">Layanan dengan setoran terbesar</p>
-          <h4 class="text-base font-bold text-[#0000CD] truncate mt-1" id="layanan-kpi-2" title="">—</h4>
+          <p class="text-xs text-gray-500">NTPN dengan setoran terbesar</p>
+          <h4 class="text-base font-bold text-[#0000CD] truncate mt-1" id="ntpn-kpi-2" title="">—</h4>
         </div>
         <div class="card card-pad relative overflow-hidden">
           <p class="text-xs text-gray-500">Transaksi outlier</p>
-          <h4 class="text-2xl font-extrabold text-red-500 num mt-1" id="layanan-kpi-3">0</h4>
+          <h4 class="text-2xl font-extrabold text-red-500 num mt-1" id="ntpn-kpi-3">0</h4>
           <div class="absolute right-2 bottom-1 text-red-100 pointer-events-none"><i class="ph-fill ph-warning text-4xl"></i></div>
         </div>
       </div>
 
       <div class="flex flex-col xl:flex-row gap-4">
-        <div class="card card-pad flex-[6] flex flex-col min-h-[380px]">
-          <h4 class="text-sm font-semibold mb-2">Top 10 Layanan</h4>
-          <div id="chart-layanan-bar" class="flex-1 w-full min-h-[300px]"></div>
+        <div class="card card-pad flex-[6] flex flex-col min-h-[400px]">
+          <h4 class="text-sm font-semibold mb-1">Top 10 NTPN</h4>
+          <p class="text-[10px] text-gray-400 mb-2">Teks kolom NTPN ditampilkan apa adanya, tanpa penggantian label.</p>
+          <div id="chart-ntpn-bar" class="flex-1 w-full min-h-[320px]"></div>
         </div>
 
-        <div class="card card-pad flex-[4] flex flex-col min-h-[380px]">
-          <h4 class="text-sm font-semibold mb-2">Rincian Layanan</h4>
-          <div class="overflow-y-auto flex-1" style="max-height:340px">
+        <div class="card card-pad flex-[4] flex flex-col min-h-[400px]">
+          <h4 class="text-sm font-semibold mb-2">Rincian NTPN</h4>
+          <div class="overflow-y-auto flex-1" style="max-height:360px">
             <table class="fixed text-left text-xs">
               <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
                 <tr>
-                  <th class="p-2.5 w-[52%]">LAYANAN (kolom NTPN)</th>
+                  <th class="p-2.5 w-[52%]">NTPN</th>
                   <th class="p-2.5 w-[14%]">Trx</th>
                   <th class="p-2.5 w-[34%] text-right">Setoran</th>
                 </tr>
               </thead>
-              <tbody id="layanan-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
+              <tbody id="ntpn-tbody" class="divide-y divide-gray-100 text-gray-700"></tbody>
             </table>
           </div>
-          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="layanan-pagination"></div>
+          <div class="mt-2 flex justify-between items-center text-xs text-gray-500 border-t pt-3" id="ntpn-pagination"></div>
         </div>
       </div>
     </section>
 
-    <!-- 3. WAJIB BAYAR -->
     <section id="section-payer" class="flex flex-col gap-4 mt-6 scroll-mt-28">
       <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
         <i class="ph-fill ph-users-three text-gray-600"></i> Wajib Bayar
@@ -566,20 +647,20 @@
               <h4 class="text-sm font-bold text-[#0000CD] mt-1 truncate" id="payer-kpi-2" title="">—</h4>
             </div>
             <div class="card card-pad">
-              <p class="text-xs text-gray-500">Konsentrasi top-1 (eq.)</p>
-              <h4 class="text-2xl font-extrabold text-gray-900 num mt-1" id="payer-kpi-3">0%</h4>
+              <p class="text-xs text-gray-500">Porsi top-1 (IDR / USD)</p>
+              <h4 class="text-lg font-extrabold text-gray-900 num mt-1" id="payer-kpi-3">0% / 0%</h4>
             </div>
           </div>
 
           <div class="card card-pad flex-1 relative flex flex-col min-h-[300px]">
-            <h4 class="text-sm font-semibold mb-2">Segmentasi Wajib Bayar (ekuivalen IDR)</h4>
+            <h4 class="text-sm font-semibold mb-2">Segmentasi Wajib Bayar</h4>
             <div id="chart-payer-pie" class="flex-1 w-full min-h-[250px]"></div>
           </div>
         </div>
 
-        <div class="card card-pad flex-[5] flex flex-col min-h-[420px]">
+        <div class="card card-pad flex-[5] flex flex-col min-h-[440px]">
           <h4 class="text-sm font-semibold mb-2">Rincian Wajib Bayar</h4>
-          <div class="overflow-y-auto flex-1" style="max-height:380px">
+          <div class="overflow-y-auto flex-1" style="max-height:400px">
             <table class="fixed text-left text-xs">
               <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
                 <tr>
@@ -596,7 +677,6 @@
       </div>
     </section>
 
-    <!-- 4. KUALITAS DATA -->
     <section id="section-quality" class="flex flex-col gap-4 mt-6 mb-10 scroll-mt-28">
       <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
         <i class="ph-fill ph-shield-check text-[#228B22]"></i> Kualitas Data
@@ -650,13 +730,16 @@
         <span class="text-[11px] font-bold text-[#0000CD] num text-right" id="rs-total-usd">$ 0</span>
       </div>
       <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm gap-2">
+        <span class="text-[11px] text-gray-500 font-medium">Capaian target</span>
+        <span class="text-[11px] font-bold text-gray-700 text-right" id="rs-target">—</span>
+      </div>
+      <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm gap-2">
         <span class="text-[11px] text-gray-500 font-medium">Periode data</span>
         <span class="text-[11px] font-bold text-gray-700 text-right" id="rs-period">—</span>
       </div>
     </div>
   </div>
 
-  <!-- Asisten data -->
   <div class="flex-1 flex flex-col min-h-[240px] border-b border-gray-100 bg-white overflow-hidden">
     <div class="p-3 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-white flex-shrink-0">
       <h3 class="text-xs font-bold text-gray-800 flex items-center gap-2">
@@ -666,14 +749,14 @@
     </div>
     <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5" id="chat-log">
       <div class="bg-gray-100 text-gray-700 text-[11px] p-2.5 rounded-tr-lg rounded-bl-lg rounded-br-lg max-w-[90%] leading-relaxed">
-        Halo. Saya menjawab dari data yang sedang tampil (bukan model bahasa). Coba tanyakan “total”, “terbesar”, “anomali”, “satker”, atau “kualitas data”.
+        Halo. Saya menjawab dari data yang sedang tampil (bukan model bahasa). Coba “total”, “IDR”, “USD”, “terbesar”, “target”, “anomali”, “satker”, atau “kualitas”.
       </div>
     </div>
     <div class="px-2 pt-2 flex flex-wrap gap-1.5 flex-shrink-0">
       <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Total</button>
-      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Terbesar</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">USD</button>
+      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Target</button>
       <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Anomali</button>
-      <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Satker</button>
       <button class="chat-chip text-[10px] px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Kualitas</button>
     </div>
     <div class="p-2 border-t border-gray-100 bg-gray-50 flex gap-2 flex-shrink-0">
@@ -684,7 +767,6 @@
     </div>
   </div>
 
-  <!-- Status & footer -->
   <div class="p-4 border-t border-gray-100 flex flex-col gap-2.5 bg-white flex-shrink-0">
     <div class="flex justify-between items-center text-[10px] gap-2">
       <span class="text-gray-500">Sumber data</span>
@@ -703,7 +785,7 @@
     </button>
     <p class="text-[9px] text-center text-gray-400 leading-relaxed mt-1">
       Biro Perencanaan BMKG · Sumber: SIMPONI-V2<br>
-      Dashboard tidak menulis apa pun ke spreadsheet.
+      Spreadsheet bersifat credential; halaman ini hanya menerima data olahan dari Apps Script.
     </p>
   </div>
 </aside>
@@ -713,34 +795,34 @@
   <form method="dialog" class="p-5 flex flex-col gap-4" id="settings-form">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h2 class="text-base font-bold text-gray-900">Pengaturan sumber data</h2>
-        <p class="text-[11px] text-gray-500 mt-1">Disimpan di browser ini saja (localStorage).</p>
+        <h2 class="text-base font-bold text-gray-900">Koneksi Google Apps Script</h2>
+        <p class="text-[11px] text-gray-500 mt-1">Satu-satunya sumber data. Disimpan di browser ini (localStorage).</p>
       </div>
       <button value="close" class="text-gray-400 hover:text-gray-700 p-1" aria-label="Tutup"><i class="ph ph-x text-lg"></i></button>
     </div>
 
     <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
-      Endpoint Apps Script (/exec)
+      Endpoint Web App (/exec)
       <input id="cfg-endpoint" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec"
         class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD] w-full">
-      <span class="font-normal text-[10px] text-gray-500">Dipakai saat dashboard dibuka dari GitHub Pages / hosting statis.</span>
+      <span class="font-normal text-[10px] text-gray-500">Deploy sebagai Web App: Execute as <b>Me</b>, Who has access <b>Anyone</b>. Data diambil lewat JSONP.</span>
     </label>
 
-    <div class="grid grid-cols-2 gap-3">
-      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
-        Kurs USD → IDR
-        <input id="cfg-fx" type="number" min="1" step="1" class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD]">
-      </label>
-      <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
-        Cache snapshot (menit)
-        <input id="cfg-cache" type="number" min="0" step="1" class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD]">
-      </label>
-    </div>
+    <label class="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+      Cache payload di browser (menit)
+      <input id="cfg-cache" type="number" min="0" step="1" class="font-normal text-sm px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:border-[#0000CD]">
+    </label>
 
     <label class="flex items-center gap-2 text-xs font-semibold text-gray-700">
       <input id="cfg-snapshot" type="checkbox" class="rounded border-gray-300">
-      Pakai snapshot lokal <code class="font-mono text-[10px] bg-gray-100 px-1 rounded">data/latest.json</code> bila GAS gagal
+      Pakai snapshot contoh <code class="font-mono text-[10px] bg-gray-100 px-1 rounded">data/latest.json</code> bila GAS belum tersambung
     </label>
+
+    <div class="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3 leading-relaxed">
+      <b>Tidak ada konversi kurs.</b> Semua angka IDR dan USD ditampilkan terpisah.
+      Spreadsheet tidak pernah dibaca browser secara langsung — hanya Apps Script yang membacanya,
+      sehingga URL/ID spreadsheet tetap privat.
+    </div>
 
     <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
       <button type="button" id="cfg-reset" class="text-xs font-semibold text-gray-500 hover:text-gray-800">Kembalikan default</button>
@@ -752,22 +834,25 @@
   </form>
 </dialog>
 
-<!-- Toast -->
 <div id="toast" class="toast bg-gray-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl"></div>
 
 <script id="app-js">
 
 /* ============================================================================
- * Dashboard Pembayaran PNBP BMKG — logika aplikasi (single-file)
+ * Dashboard Pembayaran PNBP BMKG — logika aplikasi (single file)
  * ----------------------------------------------------------------------------
- * Alur data:
- *   google.script.run (di dalam GAS)
- *     -> JSONP ke endpoint /exec (GitHub Pages / hosting statis)
- *     -> fetch JSON (bila CORS tersedia)
- *     -> snapshot lokal data/latest.json
- *     -> data demo (selalu diberi label "demo")
+ * Sumber data: HANYA Google Apps Script (Web App /exec).
+ *   1. google.script.run  -> bila halaman disajikan oleh Apps Script
+ *   2. JSONP ke /exec     -> bila halaman disajikan GitHub Pages
+ *   3. snapshot contoh    -> hanya untuk pratinjau saat GAS belum tersambung
  *
- * Tidak ada penulisan ke spreadsheet. Semua agregasi dilakukan di browser.
+ * Aturan angka:
+ *   - Tidak ada konversi kurs sama sekali.
+ *   - IDR dan USD selalu dihitung, diurutkan, dan ditampilkan terpisah.
+ *   - Baris dengan mata uang lain ditandai "lain" dan tidak dicampur.
+ *
+ * Spreadsheet bersifat credential dan tidak pernah dibaca langsung oleh
+ * browser: hanya Apps Script yang membukanya, lalu mengirim data olahan.
  * ==========================================================================*/
 'use strict';
 
@@ -775,18 +860,17 @@
  * 1. KONFIGURASI
  * --------------------------------------------------------------------------*/
 const DEFAULT_CONFIG = {
-  // Ganti dengan URL /exec hasil deploy Code.gs yang baru.
-  // Bisa juga di-override lewat ?endpoint=... atau dialog Pengaturan.
-  gasEndpoint: 'https://script.google.com/macros/s/AKfycbxYdaDmYZUSku8mrGPyktlCZRr-Xt2qy2C5UHofJ7vqMcAn50_T6leg6r0W0c3_nYsc/exec',
-  snapshotUrl: 'data/latest.json',
-  fxUsdIdr: 16000,          // kurs asumsi untuk ekuivalen IDR (bisa diubah)
+  // Wajib diisi dengan URL /exec hasil deploy Code.gs.
+  // Bisa juga lewat ?endpoint=… atau dialog Pengaturan.
+  gasEndpoint: '',
+  snapshotUrl: 'data/latest.json',   // berisi data CONTOH, bukan data asli
   useSnapshot: true,
-  cacheMinutes: 15,         // cache payload live di sessionStorage
+  cacheMinutes: 15,
   requestTimeoutMs: 15000,
 };
 
-const CONFIG_KEY = 'pnbp.config.v1';
-const CACHE_KEY = 'pnbp.payload.v1';
+const CONFIG_KEY = 'pnbp.config.v2';
+const CACHE_KEY = 'pnbp.payload.v2';
 
 function loadConfig() {
   let cfg = { ...DEFAULT_CONFIG };
@@ -796,28 +880,30 @@ function loadConfig() {
   } catch (e) { /* localStorage bisa diblokir */ }
   try {
     const params = new URLSearchParams(location.search);
-    if (params.get('endpoint')) cfg.gasEndpoint = params.get('endpoint').trim();
-    if (params.get('fx')) cfg.fxUsdIdr = Number(params.get('fx')) || cfg.fxUsdIdr;
+    const endpoint = params.get('endpoint');
+    if (endpoint) cfg.gasEndpoint = endpoint.trim();
     if (params.get('snapshot') === '0') cfg.useSnapshot = false;
-  } catch (e) { /* URLSearchParams selalu ada di browser modern */ }
-  if (!(cfg.fxUsdIdr > 0)) cfg.fxUsdIdr = DEFAULT_CONFIG.fxUsdIdr;
+  } catch (e) { /* abaikan */ }
   return cfg;
 }
 
 const state = {
   config: loadConfig(),
-  rows: [],           // baris ternormalisasi
+  rows: [],           // baris dari GAS setelah normalisasi
   view: [],           // baris setelah pencarian + filter mata uang
-  filter: 'Month',
+  filter: 'Month',    // periode agregasi
   search: '',
-  currency: 'all',
-  source: null,       // { kind, label, detail }
+  currencyFilter: 'all',
+  valueView: 'IDR',   // mata uang untuk chart & peringkat
+  source: null,
   meta: {},
   metrics: null,
+  targets: [],        // target dari sheet target (atau pembanding otomatis)
+  targetsMeta: {},
+  targetEval: null,
   trendLog: false,
   loading: true,
   lastSync: null,
-  tablePage: 1,
 };
 
 /* ----------------------------------------------------------------------------
@@ -859,7 +945,6 @@ function parseAmountLoose(value) {
     s = (parts.length === 2 && parts[1].length <= 2) ? s.replace(',', '.') : s.replace(/,/g, '');
   } else if (hasDot) {
     const parts = s.split('.');
-    // "1.234.567" atau "1.000" -> pemisah ribuan
     if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3)) {
       s = s.replace(/\./g, '');
     }
@@ -883,7 +968,6 @@ function parseDateValue(value) {
   if (m) {
     let year = Number(m[3]);
     if (year < 100) year += 2000;
-    // Format Indonesia: dd/mm/yyyy. Jika angka pertama > 12, dipastikan tanggal.
     let day = Number(m[1]);
     let month = Number(m[2]);
     if (month > 12 && day <= 12) { const t = day; day = month; month = t; }
@@ -898,7 +982,6 @@ function parseDateValue(value) {
 const pad2 = (n) => String(n).padStart(2, '0');
 const isoDate = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 
-/** Kunci periode: Day -> YYYY-MM-DD, Month -> YYYY-MM, Year -> YYYY */
 function periodKey(date, filter) {
   if (!date) return 'Tanpa tanggal';
   const y = date.getFullYear();
@@ -917,11 +1000,12 @@ function fmtIDR(n, compact = false) {
   const v = Number(n) || 0;
   if (compact) {
     const a = Math.abs(v);
-    if (a >= 1e15) return `Rp ${(v / 1e15).toFixed(2)} P`;
-    if (a >= 1e12) return `Rp ${(v / 1e12).toFixed(2)} T`;
-    if (a >= 1e9) return `Rp ${(v / 1e9).toFixed(2)} M`;
-    if (a >= 1e6) return `Rp ${(v / 1e6).toFixed(1)} Jt`;
-    if (a >= 1e3) return `Rp ${(v / 1e3).toFixed(0)} Rb`;
+    const idr = (value, digits) => value.toFixed(digits).replace('.', ',');
+    if (a >= 1e15) return `Rp ${idr(v / 1e15, 2)} P`;
+    if (a >= 1e12) return `Rp ${idr(v / 1e12, 2)} T`;
+    if (a >= 1e9) return `Rp ${idr(v / 1e9, 2)} M`;
+    if (a >= 1e6) return `Rp ${idr(v / 1e6, 1)} Jt`;
+    if (a >= 1e3) return `Rp ${idr(v / 1e3, 0)} Rb`;
   }
   return FMT_IDR.format(v);
 }
@@ -941,6 +1025,9 @@ const fmtAmount = (n, currency, compact = false) => (currency === 'USD'
   ? fmtUSD(n, compact)
   : fmtIDR(n, compact));
 
+const fmtValue = (n, compact = false) => fmtAmount(n, state.valueView, compact);
+const currencyOfView = () => state.valueView;
+
 function fmtPct(n, digits = 1) {
   if (!Number.isFinite(n)) return '—';
   return `${n >= 0 ? '' : '−'}${Math.abs(n).toFixed(digits)}%`;
@@ -953,7 +1040,7 @@ function fmtDateShort(iso) {
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/** Format label periode untuk sumbu chart */
+/** Label periode untuk sumbu chart */
 function fmtPeriodLabel(key) {
   if (!key || key === 'Tanpa tanggal') return 'Tanpa tanggal';
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -964,6 +1051,10 @@ function fmtPeriodLabel(key) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
     const [, m, d] = key.split('-');
     return `${Number(d)} ${monthNames[Number(m) - 1]}`;
+  }
+  if (/^\d{4}-Q[1-4]$/.test(key)) {
+    const [y, q] = key.split('-');
+    return `${q} ${y}`;
   }
   return key;
 }
@@ -995,20 +1086,19 @@ const FIELD_ALIASES = {
   satker: ['KODE KL/UNIT/SATKER', 'KODE KL / UNIT / SATKER', 'KODE KL', 'SATKER', 'UNIT'],
   billing: ['KODE BILLING', 'BILLING'],
   bankPos: ['KODE BANK/POS', 'KODE BANK / POS', 'KODE BANK', 'BANK POS'],
-  layanan: ['NTPN', 'LAYANAN', 'JENIS LAYANAN', 'NAMA LAYANAN'],
+  ntpn: ['NTPN', 'NTPN ', 'NOMOR NTPN', 'NO NTPN'],
   ntb: ['NTB/NTP', 'NTB / NTP', 'NTB', 'NTP'],
   penerimaan: ['KODE PENERIMAAN', 'KODE PENERIMAAN (F)'],
   kodePP: ['KODE PP', 'PP'],
   kodeTarif: ['KODE TARIF', 'TARIF'],
   nominalTarif: ['NOMINAL TARIF', 'TARIF SATUAN', 'NOMINAL'],
   volume: ['VOLUME', 'VOL'],
-  currency: ['MATA UANG', 'CURRENCY', 'KURS'],
+  currency: ['MATA UANG', 'CURRENCY'],
   akun: ['KODE AKUN', 'AKUN'],
   amount: ['SETORAN PER AKUN', 'SETORAN', 'JUMLAH SETORAN', 'NILAI SETORAN', 'AMOUNT'],
   keterangan: ['KETERANGAN', 'DESKRIPSI', 'CATATAN', 'KET'],
 };
 
-/** Ambil nilai dari objek baris dengan pencocokan header yang toleran */
 function pickField(raw, aliases) {
   for (const alias of aliases) {
     if (raw[alias] != null && raw[alias] !== '') return raw[alias];
@@ -1021,7 +1111,6 @@ function pickField(raw, aliases) {
     const key = alias.trim().toLowerCase();
     if (lowerMap[key] != null && lowerMap[key] !== '') return lowerMap[key];
   }
-  // pencocokan longgar: header mengandung alias
   const keys = Object.keys(lowerMap);
   for (const alias of aliases) {
     const needle = alias.trim().toLowerCase();
@@ -1031,13 +1120,21 @@ function pickField(raw, aliases) {
   return '';
 }
 
+/** "437174 - STASIUN METEOROLOGI …" -> { code, name } */
+function splitSatker(value) {
+  const text = String(value || '').trim();
+  if (!text) return { code: '', name: '' };
+  const match = text.match(/^(\d{3,})\s*[-–—:]\s*(.+)$/);
+  if (match) return { code: match[1], name: match[2].trim() };
+  return { code: '', name: text };
+}
+
 function normalizeRow(raw, index) {
   if (!raw || typeof raw !== 'object') return null;
-  // Dukungan payload array (urutan kolom sheet A..P)
   if (Array.isArray(raw)) {
-    const names = Object.keys(FIELD_ALIASES);
+    const fields = Object.keys(FIELD_ALIASES);
     const obj = {};
-    names.forEach((field, i) => { obj[FIELD_ALIASES[field][0]] = raw[i]; });
+    fields.forEach((field, i) => { obj[FIELD_ALIASES[field][0]] = raw[i]; });
     raw = obj;
   }
 
@@ -1045,10 +1142,8 @@ function normalizeRow(raw, index) {
   const date = parseDateValue(dateRaw);
   const currencyRaw = String(pickField(raw, FIELD_ALIASES.currency) || 'IDR').trim().toUpperCase();
   const currency = currencyRaw === 'USD' || currencyRaw === 'IDR' ? currencyRaw : (currencyRaw || 'IDR');
-
-  const amount = toNum(pickField(raw, FIELD_ALIASES.amount));
-  const nominalTarif = toNum(pickField(raw, FIELD_ALIASES.nominalTarif));
-  const volume = toNum(pickField(raw, FIELD_ALIASES.volume));
+  const satkerRaw = String(pickField(raw, FIELD_ALIASES.satker) || '').trim();
+  const satker = splitSatker(satkerRaw);
 
   return {
     id: index,
@@ -1056,24 +1151,26 @@ function normalizeRow(raw, index) {
     dateRaw: String(dateRaw || '').trim(),
     date,
     dateISO: date ? isoDate(date) : '',
-    satker: String(pickField(raw, FIELD_ALIASES.satker) || '').trim(),
+    satkerRaw,
+    satkerCode: satker.code,
+    satkerName: satker.name,
     billing: String(pickField(raw, FIELD_ALIASES.billing) || '').trim(),
     bankPos: String(pickField(raw, FIELD_ALIASES.bankPos) || '').trim(),
-    layanan: String(pickField(raw, FIELD_ALIASES.layanan) || '').trim(),
+    // NTPN dipakai apa adanya: tidak diganti label, tidak dipotong.
+    ntpn: String(pickField(raw, FIELD_ALIASES.ntpn) || '').trim(),
     ntb: String(pickField(raw, FIELD_ALIASES.ntb) || '').trim(),
     penerimaan: String(pickField(raw, FIELD_ALIASES.penerimaan) || '').trim(),
     kodePP: String(pickField(raw, FIELD_ALIASES.kodePP) || '').trim(),
     kodeTarif: String(pickField(raw, FIELD_ALIASES.kodeTarif) || '').trim(),
-    nominalTarif,
-    volume,
+    nominalTarif: toNum(pickField(raw, FIELD_ALIASES.nominalTarif)),
+    volume: toNum(pickField(raw, FIELD_ALIASES.volume)),
     currency,
     akun: String(pickField(raw, FIELD_ALIASES.akun) || '').trim(),
-    amount,
+    amount: toNum(pickField(raw, FIELD_ALIASES.amount)),
     keterangan: String(pickField(raw, FIELD_ALIASES.keterangan) || '').trim(),
   };
 }
 
-/** Normalisasi payload dari GAS / snapshot / demo menjadi array baris */
 function extractRows(payload) {
   if (Array.isArray(payload)) return { rows: payload, meta: {} };
   if (payload && Array.isArray(payload.rows)) return { rows: payload.rows, meta: payload.meta || {} };
@@ -1081,8 +1178,21 @@ function extractRows(payload) {
   return { rows: [], meta: {} };
 }
 
+/** Target dari GAS: payload.targets atau payload.meta.targets */
+function extractTargets(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { targets: [], meta: {} };
+  }
+  const list = payload.targets || payload.target || (payload.meta && payload.meta.targets) || [];
+  const meta = payload.targetsMeta || (payload.meta && payload.meta.targetsMeta) || {};
+  return {
+    targets: Array.isArray(list) ? list.filter((t) => t && typeof t === 'object') : [],
+    meta: meta && typeof meta === 'object' ? meta : {},
+  };
+}
+
 /* ----------------------------------------------------------------------------
- * 4. PEMUATAN DATA (GAS -> JSONP -> fetch -> snapshot -> demo)
+ * 4. PEMUATAN DATA (GAS saja)
  * --------------------------------------------------------------------------*/
 const hasGasRuntime = () => typeof google !== 'undefined' && google.script && google.script.run;
 
@@ -1101,7 +1211,6 @@ function hideLoader() {
   setTimeout(() => el.classList.add('hidden'), 280);
 }
 
-/** Panggil fungsi Apps Script; mendukung payload baru dan array lama */
 function gasRequest(fnName, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -1125,7 +1234,7 @@ function gasRequest(fnName, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
   });
 }
 
-/** JSONP: jalur paling andal untuk domain statis (GAS tidak mengirim CORS) */
+/** JSONP: satu-satunya jalur yang bisa dipakai halaman statis (GAS tanpa CORS) */
 function jsonp(url, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
   return new Promise((resolve, reject) => {
     const cb = '__pnbpCb_' + Math.random().toString(36).slice(2);
@@ -1149,6 +1258,10 @@ function jsonp(url, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
       if (settled) return;
       settled = true;
       cleanup();
+      if (!data || data.ok === false) {
+        reject(new Error((data && data.error) || 'Endpoint mengembalikan status gagal.'));
+        return;
+      }
       resolve(data);
     };
 
@@ -1156,7 +1269,7 @@ function jsonp(url, timeout = DEFAULT_CONFIG.requestTimeoutMs) {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error('Gagal memuat endpoint (cek akses "Anyone" dan URL /exec).'));
+      reject(new Error('Gagal memuat endpoint (pastikan akses "Anyone" dan URL /exec).'));
     };
 
     try {
@@ -1190,8 +1303,7 @@ function readCache() {
   try {
     const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
     if (!cached || !cached.at) return null;
-    const ageMs = Date.now() - cached.at;
-    if (ageMs > state.config.cacheMinutes * 60000) return null;
+    if (Date.now() - cached.at > state.config.cacheMinutes * 60000) return null;
     return cached;
   } catch (e) { return null; }
 }
@@ -1205,15 +1317,17 @@ function writeCache(payload) {
 const ERRORS = [];
 let liveRefreshInFlight = false;
 
-/** Terapkan payload (array baris / {rows}) ke state lalu render. */
 function applyPayload(payload, source) {
   const extracted = extractRows(payload);
-  const rows = extracted.rows.map(normalizeRow).filter(Boolean);
-  state.rows = rows;
+  const targetInfo = extractTargets(payload);
+
+  state.rows = extracted.rows.map(normalizeRow).filter(Boolean);
   state.meta = extracted.meta || {};
-  state.source = rows.length
+  state.targets = targetInfo.targets;
+  state.targetsMeta = targetInfo.meta;
+  state.source = state.rows.length
     ? source
-    : { kind: 'empty', label: 'Tidak ada data', detail: 'Sumber terhubung tetapi tidak berisi baris.' };
+    : { kind: 'empty', label: 'Tidak ada data', detail: 'Endpoint terhubung tetapi tidak berisi baris.' };
   state.loading = false;
   state.lastSync = new Date();
   applyView();
@@ -1226,9 +1340,8 @@ async function loadFromGasRuntime() {
       if (result && Array.isArray(result.rows) && result.rows.length) {
         return { payload: result, source: { kind: 'gas', label: 'Apps Script (live)', detail: 'google.script.run' } };
       }
-    } catch (err) {
-      // fungsi baru belum ada di deployment lama -> coba fungsi lama
-    }
+    } catch (err) { /* fungsi baru belum ada di deployment lama */ }
+
     const legacy = await gasRequest('getDashboardData');
     const extracted = extractRows(legacy);
     if (extracted.rows.length) {
@@ -1241,6 +1354,27 @@ async function loadFromGasRuntime() {
   return null;
 }
 
+async function loadEndpoint() {
+  const endpoint = state.config.gasEndpoint;
+  if (!endpoint) {
+    ERRORS.push('Endpoint GAS belum diatur.');
+    return null;
+  }
+  try {
+    const result = await jsonp(endpoint, 12000);
+    const extracted = extractRows(result);
+    if (!extracted.rows.length) throw new Error('endpoint mengembalikan 0 baris');
+    return {
+      payload: result,
+      raw: result,
+      source: { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' },
+    };
+  } catch (err) {
+    ERRORS.push(err.message);
+    return null;
+  }
+}
+
 async function loadSnapshot() {
   try {
     const result = await fetchJson(state.config.snapshotUrl, 12000);
@@ -1248,7 +1382,7 @@ async function loadSnapshot() {
     if (!extracted.rows.length) throw new Error('snapshot kosong');
     const isDemo = !!(extracted.meta && extracted.meta.demo);
     return {
-      payload: extracted,
+      payload: result,
       source: {
         kind: isDemo ? 'demo' : 'snapshot',
         label: isDemo ? 'Data contoh (snapshot)' : 'Snapshot lokal',
@@ -1263,48 +1397,6 @@ async function loadSnapshot() {
   }
 }
 
-async function loadEndpoint() {
-  const endpoint = state.config.gasEndpoint;
-  if (!endpoint) {
-    ERRORS.push('Endpoint GAS belum diatur.');
-    return null;
-  }
-
-  try {
-    const result = await jsonp(endpoint, 12000);
-    const extracted = extractRows(result);
-    if (!extracted.rows.length) throw new Error('endpoint mengembalikan 0 baris');
-    return {
-      payload: extracted,
-      raw: result,
-      source: { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' },
-    };
-  } catch (err) {
-    ERRORS.push(err.message);
-  }
-
-  // Jalur cadangan: fetch biasa (hanya berhasil bila CORS diizinkan).
-  try {
-    const target = new URL(endpoint);
-    target.searchParams.set('action', 'data');
-    target.searchParams.set('format', 'json');
-    const result = await fetchJson(target.toString(), 12000);
-    const extracted = extractRows(result);
-    if (extracted.rows.length) {
-      return {
-        payload: extracted,
-        raw: result,
-        source: { kind: 'fetch', label: 'Apps Script (live)', detail: 'fetch JSON' },
-      };
-    }
-  } catch (err) {
-    ERRORS.push('fetch: ' + err.message);
-  }
-
-  return null;
-}
-
-/** Ambil data live di latar belakang tanpa mengganggu tampilan yang sudah ada. */
 async function refreshFromLive() {
   if (liveRefreshInFlight || hasGasRuntime() || !state.config.gasEndpoint) return;
   liveRefreshInFlight = true;
@@ -1313,7 +1405,7 @@ async function refreshFromLive() {
     const extracted = extractRows(result);
     if (!extracted.rows.length) throw new Error('0 baris');
     writeCache(result);
-    applyPayload(extracted, { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' });
+    applyPayload(result, { kind: 'jsonp', label: 'Apps Script (live)', detail: 'JSONP /exec' });
   } catch (err) {
     ERRORS.push(err.message);
     if (state.source && state.source.kind === 'snapshot') {
@@ -1327,9 +1419,8 @@ async function refreshFromLive() {
 async function loadData({ force = false } = {}) {
   state.loading = true;
   ERRORS.length = 0;
-  const cfg = state.config;
 
-  // 1. Di dalam Apps Script: google.script.run paling cepat dan tanpa CORS.
+  // 1. Di dalam Apps Script
   if (hasGasRuntime()) {
     showLoader('Mengambil data dari spreadsheet…', 'google.script.run');
     const live = await loadFromGasRuntime();
@@ -1340,21 +1431,21 @@ async function loadData({ force = false } = {}) {
     }
   }
 
-  // 2. Cache sesi & snapshot: tampilkan cepat, lalu segarkan dari live.
   if (!force) {
+    // 2. Cache sesi
     const cached = readCache();
     if (cached) {
       const extracted = extractRows(cached.payload);
       if (extracted.rows.length) {
-        applyPayload(extracted, { kind: 'cache', label: 'Cache sesi', detail: 'Data live terakhir di tab ini' });
+        applyPayload(cached.payload, { kind: 'cache', label: 'Cache sesi', detail: 'Data live terakhir di tab ini' });
         hideLoader();
         refreshFromLive();
         return;
       }
     }
-
-    if (cfg.useSnapshot && cfg.snapshotUrl) {
-      showLoader('Memuat snapshot…', cfg.snapshotUrl);
+    // 3. Snapshot contoh
+    if (state.config.useSnapshot && state.config.snapshotUrl) {
+      showLoader('Memuat snapshot contoh…', state.config.snapshotUrl);
       const snapshot = await loadSnapshot();
       if (snapshot) {
         applyPayload(snapshot.payload, snapshot.source);
@@ -1365,8 +1456,8 @@ async function loadData({ force = false } = {}) {
     }
   }
 
-  // 3. Endpoint GAS (JSONP, lalu fetch).
-  showLoader('Menghubungi Google Apps Script…', cfg.gasEndpoint || 'endpoint belum diatur');
+  // 4. Endpoint GAS (JSONP)
+  showLoader('Menghubungi Google Apps Script…', state.config.gasEndpoint || 'endpoint belum diatur');
   const live = await loadEndpoint();
   if (live) {
     applyPayload(live.payload, live.source);
@@ -1375,8 +1466,8 @@ async function loadData({ force = false } = {}) {
     return;
   }
 
-  // 4. Snapshot (termasuk saat muat ulang paksa).
-  if (cfg.useSnapshot && cfg.snapshotUrl) {
+  // 5. Snapshot contoh saat muat ulang paksa
+  if (state.config.useSnapshot && state.config.snapshotUrl) {
     const snapshot = await loadSnapshot();
     if (snapshot) {
       applyPayload(snapshot.payload, snapshot.source);
@@ -1385,14 +1476,13 @@ async function loadData({ force = false } = {}) {
     }
   }
 
-  // 5. Data contoh.
-  applyPayload({ rows: DEMO_ROWS, meta: { demo: true } }, {
+  applyPayload({ rows: DEMO_ROWS, targets: DEMO_TARGETS, meta: { demo: true } }, {
     kind: 'demo',
     label: 'Data demo',
     detail: ERRORS.join(' · ') || 'Tidak ada sumber data yang dapat dihubungi',
   });
   hideLoader();
-  toast('Data live tidak tersedia — menampilkan data contoh. Atur endpoint di Pengaturan.');
+  toast('GAS belum tersambung — menampilkan data contoh. Atur endpoint di Pengaturan.');
 }
 
 /* ----------------------------------------------------------------------------
@@ -1400,19 +1490,18 @@ async function loadData({ force = false } = {}) {
  * --------------------------------------------------------------------------*/
 function applyView() {
   const term = state.search.trim().toLowerCase();
-  const currency = state.currency;
+  const currency = state.currencyFilter;
 
   state.view = state.rows.filter((row) => {
     if (currency !== 'all' && row.currency !== currency) return false;
     if (!term) return true;
     return [
-      row.payer, row.satker, row.layanan, row.keterangan, row.ntb,
-      row.akun, row.kodePP, row.kodeTarif, row.billing, row.bankPos,
+      row.payer, row.satkerRaw, row.satkerName, row.satkerCode, row.ntpn, row.keterangan,
+      row.ntb, row.akun, row.kodePP, row.kodeTarif, row.billing, row.bankPos,
       row.currency, row.dateISO,
     ].some((value) => String(value || '').toLowerCase().includes(term));
   });
 
-  state.tablePage = 1;
   renderAll();
 }
 
@@ -1426,35 +1515,70 @@ function setFilter(filter) {
   renderAll();
 }
 
+function setValueView(view) {
+  state.valueView = view === 'USD' ? 'USD' : 'IDR';
+  $$('#value-view-toggle .value-btn').forEach((btn) => {
+    const active = btn.dataset.view === state.valueView;
+    btn.classList.toggle('bg-[#228B22]/10', active && btn.dataset.view === 'IDR');
+    btn.classList.toggle('text-[#228B22]', active && btn.dataset.view === 'IDR');
+    btn.classList.toggle('bg-[#0000CD]/10', active && btn.dataset.view === 'USD');
+    btn.classList.toggle('text-[#0000CD]', active && btn.dataset.view === 'USD');
+    btn.classList.toggle('text-gray-600', !active);
+    btn.classList.toggle('hover:bg-gray-50', !active);
+  });
+  renderAll();
+}
+
 /* ----------------------------------------------------------------------------
- * 6. MESIN ANALITIK
+ * 6. MESIN ANALITIK (dwi-mata-uang: IDR dan USD tidak pernah dijumlahkan)
  * --------------------------------------------------------------------------*/
 const colorFor = (index) => ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#DC2626', '#0EA5E9', '#F59E0B', '#14B8A6'][index % 10];
 
-function bump(map, key, row, equivalent) {
+const CURRENCY_LABEL = { IDR: 'IDR', USD: 'USD', other: 'Lainnya' };
+
+function emptyAgg(name) {
+  return { name, idr: 0, usd: 0, other: 0, count: 0, periods: {} };
+}
+
+function bump(map, key, row) {
   const name = String(key || '').trim() || 'Tidak diisi';
   let entry = map.get(name);
   if (!entry) {
-    entry = { name, idr: 0, usd: 0, other: 0, eq: 0, count: 0, periods: {} };
+    entry = emptyAgg(name);
     map.set(name, entry);
   }
   if (row.currency === 'USD') entry.usd += row.amount;
   else if (row.currency === 'IDR') entry.idr += row.amount;
   else entry.other += row.amount;
-  entry.eq += equivalent;
   entry.count += 1;
+
   const key2 = periodKey(row.date, state.filter);
-  entry.periods[key2] = (entry.periods[key2] || 0) + equivalent;
+  if (!entry.periods[key2]) entry.periods[key2] = { idr: 0, usd: 0, count: 0 };
+  const bucket = entry.periods[key2];
+  if (row.currency === 'USD') bucket.usd += row.amount;
+  else if (row.currency === 'IDR') bucket.idr += row.amount;
+  bucket.count += 1;
   return entry;
 }
 
-/** Lengkapi periode yang kosong agar tren tidak "melompat" */
+/** Nilai agregat sesuai mata uang tampilan */
+const valueOfItem = (item) => (state.valueView === 'USD' ? item.usd : item.idr);
+
+function rankList(list) {
+  return list.slice().sort((a, b) => {
+    const diff = valueOfItem(b) - valueOfItem(a);
+    if (diff) return diff;
+    if (b.count !== a.count) return b.count - a.count;
+    return String(a.name).localeCompare(String(b.name));
+  });
+}
+
 function buildPeriods(series, filter) {
   const keys = Object.keys(series).filter((key) => key !== 'Tanpa tanggal').sort();
-  if (!keys.length) return Object.keys(series);
+  if (!keys.length) return [];
   if (filter === 'Year') return keys;
 
-  const toDate = (key) => (filter === 'Day' ? parseDateValue(key) : parseDateValue(key + (filter === 'Month' ? '-01' : '')));
+  const toDate = (key) => (filter === 'Day' ? parseDateValue(key) : parseDateValue(key + '-01'));
   const first = toDate(keys[0]);
   const last = toDate(keys[keys.length - 1]);
   if (!first || !last) return keys;
@@ -1464,110 +1588,106 @@ function buildPeriods(series, filter) {
   let guard = 0;
   while (cursor <= last && guard < 800) {
     guard += 1;
-    const key = filter === 'Day' ? isoDate(cursor) : `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
-    out.push(key);
+    out.push(filter === 'Day' ? isoDate(cursor) : `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`);
     if (filter === 'Day') cursor.setDate(cursor.getDate() + 1);
     else cursor.setMonth(cursor.getMonth() + 1);
   }
-  // Untuk filter harian dengan rentang sangat panjang, jangan isi semua hari.
   if (filter === 'Day' && out.length > 180) return keys;
   return out;
 }
 
-function computeMetrics(rows, filter, fx) {
+function computeMetrics(rows, filter) {
   const series = {};
   const satkerMap = new Map();
-  const layananMap = new Map();
+  const ntpnMap = new Map();
   const payerMap = new Map();
   const akunMap = new Map();
-  const currencyMap = new Map();
 
   let totalIdr = 0;
   let totalUsd = 0;
   let totalOther = 0;
-  let totalEq = 0;
   let volume = 0;
-  const idrAmounts = [];
-  const usdAmounts = [];
+  let idrCount = 0;
+  let usdCount = 0;
+  let otherCount = 0;
   const dates = [];
 
   rows.forEach((row) => {
-    const equivalent = row.currency === 'USD' ? row.amount * fx : row.amount;
     const key = periodKey(row.date, filter);
 
-    if (!series[key]) series[key] = { idr: 0, usd: 0, other: 0, eq: 0, count: 0, volume: 0 };
+    if (!series[key]) series[key] = { idr: 0, usd: 0, other: 0, count: 0, volume: 0 };
     const bucket = series[key];
     bucket.count += 1;
-    bucket.eq += equivalent;
     bucket.volume += row.volume;
 
-    if (row.currency === 'USD') { bucket.usd += row.amount; totalUsd += row.amount; usdAmounts.push(row.amount); }
-    else if (row.currency === 'IDR') { bucket.idr += row.amount; totalIdr += row.amount; idrAmounts.push(row.amount); }
-    else { bucket.other += row.amount; totalOther += row.amount; }
+    if (row.currency === 'USD') { bucket.usd += row.amount; totalUsd += row.amount; usdCount += 1; }
+    else if (row.currency === 'IDR') { bucket.idr += row.amount; totalIdr += row.amount; idrCount += 1; }
+    else { bucket.other += row.amount; totalOther += row.amount; otherCount += 1; }
 
-    totalEq += equivalent;
     volume += row.volume;
     if (row.date) dates.push(row.dateISO);
 
-    bump(satkerMap, row.satker, row, equivalent);
-    bump(layananMap, row.layanan, row, equivalent);
-    bump(payerMap, row.payer, row, equivalent);
-    bump(akunMap, row.akun, row, equivalent);
-
-    const cur = row.currency || 'IDR';
-    currencyMap.set(cur, (currencyMap.get(cur) || 0) + 1);
+    bump(satkerMap, row.satkerRaw, row);
+    bump(ntpnMap, row.ntpn, row);
+    bump(payerMap, row.payer, row);
+    bump(akunMap, row.akun, row);
   });
 
-  const periods = buildPeriods(series, filter).filter((key) => key !== 'Tanpa tanggal');
-  const sortByEq = (map) => Array.from(map.values()).sort((a, b) => b.eq - a.eq);
-  const satkers = sortByEq(satkerMap);
-  const layanans = sortByEq(layananMap);
-  const payers = sortByEq(payerMap);
-  const akuns = sortByEq(akunMap);
-  const amounts = rows.filter((r) => r.amount > 0).map((r) => r.amount);
+  const periods = buildPeriods(series, filter);
+  const satkers = Array.from(satkerMap.values());
+  const ntpns = Array.from(ntpnMap.values());
+  const payers = Array.from(payerMap.values());
+  const akuns = Array.from(akunMap.values());
 
-  const sortedIdr = idrAmounts.filter((v) => v > 0).sort((a, b) => a - b);
-  const median = sortedIdr.length
+  // "Satker" yang hanya berisi kode tanpa nama tetap dipakai apa adanya.
+
+  const sortedIdr = rows.filter((r) => r.currency === 'IDR' && r.amount > 0).map((r) => r.amount).sort((a, b) => a - b);
+  const medianIdr = sortedIdr.length
     ? (sortedIdr.length % 2 ? sortedIdr[(sortedIdr.length - 1) / 2]
       : (sortedIdr[sortedIdr.length / 2 - 1] + sortedIdr[sortedIdr.length / 2]) / 2)
     : 0;
 
   const dateList = dates.slice().sort();
 
+  const topShare = (list, key) => {
+    const total = key === 'USD' ? totalUsd : totalIdr;
+    if (!total) return 0;
+    const top = list.reduce((max, item) => Math.max(max, item[key]), 0);
+    return (top / total) * 100;
+  };
+
   return {
     rows,
     filter,
-    fx,
     count: rows.length,
     totalIdr,
     totalUsd,
     totalOther,
-    totalEq,
+    idrCount,
+    usdCount,
+    otherCount,
+    avgIdr: idrCount ? totalIdr / idrCount : 0,
+    avgUsd: usdCount ? totalUsd / usdCount : 0,
+    medianIdr,
     volume,
-    avg: rows.length ? totalEq / rows.length : 0,
-    medianIdr: median,
     entities: payers.length,
     satkers,
-    layanans,
+    ntpns,
     payers,
     akuns,
     periods,
     series,
-    currencyMap,
     anomalies: detectAnomalies(rows),
+    shareIdr: topShare(payers, 'idr'),
+    shareUsd: topShare(payers, 'usd'),
     periodRange: dateList.length ? { from: dateList[0], to: dateList[dateList.length - 1] } : null,
+    hasIdr: totalIdr !== 0 || idrCount > 0,
+    hasUsd: totalUsd !== 0 || usdCount > 0,
     quality: null,
-    concentration: payers.length && totalEq > 0 ? (payers[0].eq / totalEq) * 100 : 0,
-    hhi: totalEq > 0
-      ? payers.reduce((sum, p) => sum + Math.pow((p.eq / totalEq) * 100, 2), 0)
-      : 0,
-    idrCount: idrAmounts.length,
-    usdCount: usdAmounts.length,
-    amounts,
   };
 }
 
-/** Anomali: |z| > 3 dihitung terpisah per mata uang (skala IDR vs USD jauh berbeda) */
+/** Anomali per mata uang: skala IDR dan USD tidak pernah dicampur */
 function detectAnomalies(rows) {
   const out = [];
   ['IDR', 'USD'].forEach((currency) => {
@@ -1585,6 +1705,268 @@ function detectAnomalies(rows) {
   });
   return out.sort((a, b) => b.z - a.z);
 }
+
+/* ----------------------------------------------------------------------------
+ * 6b. TARGET VS REALISASI
+ * ----------------------------------------------------------------------------
+ * Target datang dari GAS (sheet target apa pun bentuknya, sudah dinormalkan
+ * di Code.gs). Bila sheet target tidak ada, dashboard membuat pembanding
+ * otomatis dari periode sebelumnya dan memberi label jelas bahwa itu BUKAN
+ * target resmi.
+ *
+ * Setiap target: { label, dimension, satkerCode, satkerName, payerName,
+ *                 ntpnName, period, currency, value, source, note }
+ * --------------------------------------------------------------------------*/
+const TARGET_STATUS = {
+  achieved: { label: 'Tercapai', cls: 'chip-ok' },
+  ontrack: { label: 'Sesuai jalur', cls: 'chip-ok' },
+  watch: { label: 'Perlu perhatian', cls: 'chip-warn' },
+  behind: { label: 'Di bawah', cls: 'chip-bad' },
+  none: { label: 'Tanpa realisasi', cls: 'chip-muted' },
+};
+
+/** 'YYYY' | 'YYYY-MM' | 'YYYY-Qn' -> { kind, year, month, quarter } */
+function parseTargetPeriod(value) {
+  const text = String(value || '').trim();
+  let m = text.match(/^(\d{4})-(\d{2})$/);
+  if (m) return { kind: 'month', year: Number(m[1]), month: Number(m[2]), key: text };
+  m = text.match(/^(\d{4})-?Q([1-4])$/i);
+  if (m) return { kind: 'quarter', year: Number(m[1]), quarter: Number(m[2]), key: `${m[1]}-Q${m[2]}` };
+  m = text.match(/^(\d{4})$/);
+  if (m) return { kind: 'year', year: Number(m[1]), key: text };
+  return { kind: 'any', key: '' };
+}
+
+function rowInTargetPeriod(row, period) {
+  if (!row.date) return false;
+  if (period.kind === 'any') return true;
+  if (row.date.getFullYear() !== period.year) return false;
+  if (period.kind === 'year') return true;
+  if (period.kind === 'month') return row.date.getMonth() + 1 === period.month;
+  if (period.kind === 'quarter') {
+    const q = Math.floor(row.date.getMonth() / 3) + 1;
+    return q === period.quarter;
+  }
+  return true;
+}
+
+const normalizeName = (value) => String(value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Cocokkan target ke baris. Urutan: kode satker -> nama satker -> nama wajib
+ * bayar -> NTPN -> total. Jenis yang berhasil dipakai dilaporkan di `matchType`.
+ */
+function matchTargetRows(rows, target) {
+  const code = String(target.satkerCode || '').trim();
+  const satkerName = normalizeName(target.satkerName);
+  const label = normalizeName(target.label);
+  const payerName = normalizeName(target.payerName);
+  const ntpnName = normalizeName(target.ntpnName);
+  const hint = String(target.dimension || '').toLowerCase();
+
+  let matched = [];
+  let matchType = 'total';
+
+  if (code) {
+    matched = rows.filter((row) => row.satkerCode === code
+      || String(row.satkerRaw).trim().startsWith(code));
+    if (matched.length) matchType = 'satker';
+  }
+
+  if (!matched.length && satkerName) {
+    matched = rows.filter((row) => normalizeName(row.satkerName) === satkerName
+      || normalizeName(row.satkerRaw) === satkerName);
+    if (!matched.length) {
+      matched = rows.filter((row) => normalizeName(row.satkerName).includes(satkerName)
+        || normalizeName(row.satkerRaw).includes(satkerName));
+    }
+    if (matched.length) matchType = 'satker';
+  }
+
+  if (!matched.length && (payerName || hint === 'payer')) {
+    const needle = payerName || label;
+    matched = rows.filter((row) => normalizeName(row.payer) === needle);
+    if (!matched.length) matched = rows.filter((row) => normalizeName(row.payer).includes(needle));
+    if (matched.length) matchType = 'payer';
+  }
+
+  if (!matched.length && (ntpnName || hint === 'ntpn')) {
+    const needle = ntpnName || label;
+    matched = rows.filter((row) => normalizeName(row.ntpn) === needle);
+    if (!matched.length) matched = rows.filter((row) => normalizeName(row.ntpn).includes(needle));
+    if (matched.length) matchType = 'ntpn';
+  }
+
+  if (!matched.length && label && hint !== 'total') {
+    matched = rows.filter((row) => normalizeName(row.satkerRaw).includes(label));
+    if (!matched.length) matched = rows.filter((row) => normalizeName(row.payer).includes(label));
+    if (!matched.length) matched = rows.filter((row) => normalizeName(row.ntpn).includes(label));
+    if (matched.length) matchType = 'label';
+  }
+
+  if (!matched.length) {
+    matched = rows;
+    matchType = 'total';
+  }
+
+  return { rows: matched, matchType };
+}
+
+function monthsElapsedInYear(rows, year) {
+  const months = new Set();
+  rows.forEach((row) => {
+    if (row.date && (!year || row.date.getFullYear() === year)) months.add(row.date.getMonth() + 1);
+  });
+  return months.size;
+}
+
+/** Evaluasi target terhadap seluruh baris (bukan hanya hasil pencarian) */
+function evaluateTargets(rows, targets, filter) {
+  const items = targets.map((target) => {
+    const currency = String(target.currency || 'IDR').toUpperCase() === 'USD' ? 'USD' : 'IDR';
+    const period = parseTargetPeriod(target.period);
+    const matched = matchTargetRows(rows, target);
+    const inPeriod = matched.rows.filter((row) => rowInTargetPeriod(row, period));
+    const realized = inPeriod
+      .filter((row) => row.currency === currency)
+      .reduce((sum, row) => sum + row.amount, 0);
+
+    const targetValue = Math.abs(toNum(target.value));
+    const progress = targetValue > 0 ? (realized / targetValue) * 100 : null;
+
+    let projected = null;
+    if (targetValue > 0 && period.kind === 'year') {
+      const months = monthsElapsedInYear(rows, period.year);
+      if (months > 0) projected = (realized / months) * 12;
+    }
+
+    let status = 'none';
+    if (targetValue > 0) {
+      const basis = progress == null ? 0 : progress;
+      const projectedProgress = projected == null ? null : (projected / targetValue) * 100;
+      if (basis >= 100 || (projectedProgress != null && projectedProgress >= 100 && basis >= 60)) status = 'achieved';
+      else if (basis >= 90 || (projectedProgress != null && projectedProgress >= 90)) status = 'ontrack';
+      else if (basis >= 70) status = 'watch';
+      else status = 'behind';
+    }
+    if (!inPeriod.length) status = 'none';
+
+    return {
+      label: target.label || target.satkerName || target.payerName || '(tanpa label)',
+      matchType: matched.matchType,
+      dimension: String(target.dimension || '').toLowerCase() || 'total',
+      periodKey: period.key,
+      periodKind: period.kind,
+      currency,
+      target: targetValue,
+      realized,
+      progress,
+      projected,
+      gap: targetValue - realized,
+      status,
+      rows: inPeriod.length,
+      source: target.source || '',
+      note: target.note || '',
+      satkerCode: target.satkerCode || '',
+    };
+  });
+
+  const withTarget = items.filter((item) => item.target > 0 && item.status !== 'none');
+
+  // Hindari dobel hitung: bila ada baris target tingkat TOTAL (seluruh satker),
+  // agregat dihitung dari baris itu saja. Bila tidak ada, baru dijumlahkan
+  // dari target per satker/wajib bayar/NTPN.
+  const totalRows = withTarget.filter((item) => item.dimension === 'total' || item.matchType === 'total');
+  const basis = totalRows.length ? totalRows : withTarget;
+  const sumBy = (currency, key) => basis
+    .filter((item) => item.currency === currency)
+    .reduce((sum, item) => sum + item[key], 0);
+
+  const summary = {
+    count: items.length,
+    matched: withTarget.length,
+    basis: totalRows.length ? 'total' : 'unit',
+    targetIdr: sumBy('IDR', 'target'),
+    targetUsd: sumBy('USD', 'target'),
+    realIdr: sumBy('IDR', 'realized'),
+    realUsd: sumBy('USD', 'realized'),
+  };
+  summary.progressIdr = summary.targetIdr > 0 ? (summary.realIdr / summary.targetIdr) * 100 : null;
+  summary.progressUsd = summary.targetUsd > 0 ? (summary.realUsd / summary.targetUsd) * 100 : null;
+
+  return { items, summary, mode: items.length ? 'sheet' : 'none' };
+}
+
+/**
+ * Pembanding otomatis saat sheet target tidak tersedia:
+ * target = realisasi periode sebelumnya, diukur pada periode terakhir.
+ */
+function buildBaselineTargets(rows) {
+  const periods = buildPeriods(
+    rows.reduce((acc, row) => { acc[periodKey(row.date, 'Month')] = true; return acc; }, {}),
+    'Month',
+  );
+  if (periods.length < 2) return { targets: [], meta: { mode: 'none' } };
+
+  const currentPeriod = periods[periods.length - 1];
+  const previousPeriod = periods[periods.length - 2];
+  const sumFor = (list, currency) => list
+    .filter((row) => row.currency === currency && periodKey(row.date, 'Month') === previousPeriod)
+    .reduce((sum, row) => sum + row.amount, 0);
+
+  const targets = [];
+  const pushTarget = (label, subset, extra) => {
+    ['IDR', 'USD'].forEach((currency) => {
+      const value = sumFor(subset, currency);
+      if (value > 0) {
+        targets.push({
+          label,
+          period: currentPeriod,
+          currency,
+          value,
+          dimension: extra.dimension || 'total',
+          satkerCode: extra.satkerCode || '',
+          satkerName: extra.satkerName || '',
+          source: 'pembanding-otomatis',
+          note: `realisasi ${previousPeriod}`,
+        });
+      }
+    });
+  };
+
+  pushTarget('Seluruh satker', rows, { dimension: 'total' });
+
+  const bySatker = new Map();
+  rows.forEach((row) => {
+    const key = row.satkerRaw || 'Tidak diisi';
+    if (!bySatker.has(key)) bySatker.set(key, []);
+    bySatker.get(key).push(row);
+  });
+  Array.from(bySatker.entries())
+    .map(([label, list]) => ({ label, list, total: list.reduce((s, r) => s + (r.currency === 'IDR' ? r.amount : 0), 0) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8)
+    .forEach((entry) => {
+      const sample = entry.list[0];
+      pushTarget(entry.label, entry.list, {
+        dimension: 'satker',
+        satkerCode: sample.satkerCode,
+        satkerName: sample.satkerName,
+      });
+    });
+
+  return {
+    targets,
+    meta: {
+      mode: 'baseline',
+      note: `Sheet target tidak ditemukan. Pembanding dibuat otomatis: realisasi ${previousPeriod} dibandingkan dengan ${currentPeriod}.`,
+      currentPeriod,
+      previousPeriod,
+    },
+  };
+}
+
+/* ------------------------------ kualitas data ------------------------------ */
 
 /* ------------------------------ kualitas data ------------------------------ */
 function runQualityChecks(rows, metrics) {
@@ -1642,7 +2024,7 @@ function runQualityChecks(rows, metrics) {
     label: 'Keterangan transaksi kosong',
     severity: 'info',
     ...noKet,
-    detail: 'Keterangan membantu audit dan klasifikasi layanan.',
+    detail: 'Keterangan membantu audit dan klasifikasi NTPN.',
     fix: 'Isi keterangan saat input setoran agar jejak audit lengkap.',
   });
 
@@ -1692,7 +2074,7 @@ function runQualityChecks(rows, metrics) {
     severity: 'warn',
     count: otherCurrency.length,
     samples: otherCurrency.slice(0, 3).map((r) => `${r.payer || '?'} · "${r.currency}"`),
-    detail: 'Ekuivalen IDR memakai kurs asumsi sehingga total bisa bias.',
+    detail: 'Baris dengan mata uang lain tidak ikut dihitung pada total IDR maupun USD.',
     fix: 'Standarkan kode mata uang (IDR/USD) pada kolom MATA UANG.',
   });
 
@@ -1757,6 +2139,7 @@ function linearForecast(values, horizon = 3) {
   return { slope, intercept, r2, fitted, future, sigma };
 }
 
+
 /* ----------------------------------------------------------------------------
  * 7. INFRASTRUKTUR ECHARTS
  * --------------------------------------------------------------------------*/
@@ -1815,6 +2198,7 @@ function compactAxisLabel(currency) {
   return (value) => fmtAmount(value, currency, true).replace(currency === 'USD' ? 'USD ' : 'Rp ', '');
 }
 
+
 /* ----------------------------------------------------------------------------
  * 8. RENDER: SUMBER, BANNER, KPI
  * --------------------------------------------------------------------------*/
@@ -1824,7 +2208,6 @@ const setHTML = (id, html) => { const el = document.getElementById(id); if (el) 
 const SOURCE_STYLE = {
   gas: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
   jsonp: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
-  fetch: { cls: 'text-emerald-600', dot: 'bg-emerald-400' },
   cache: { cls: 'text-amber-600', dot: 'bg-amber-400' },
   snapshot: { cls: 'text-amber-600', dot: 'bg-amber-400' },
   demo: { cls: 'text-red-500', dot: 'bg-red-400' },
@@ -1849,38 +2232,53 @@ function renderSource(metrics) {
   setText('rs-rows', fmtNum(state.rows.length));
   setText('rs-total-idr', fmtIDR(metrics.totalIdr, true));
   setText('rs-total-usd', fmtUSD(metrics.totalUsd, true));
-  setText('rs-period', metrics.periodRange ? `${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}` : '—');
+  setText('rs-period', metrics.periodRange
+    ? `${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}`
+    : '—');
   setText('rs-synced', state.lastSync
     ? state.lastSync.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
     : '—');
-
-  const styleEl = $('#rs-source');
-  if (styleEl && source.kind === 'demo') styleEl.title = source.detail;
 }
 
 function renderBanner(metrics) {
   setText('insight-total-idr', fmtIDR(metrics.totalIdr));
   setText('insight-total-usd', fmtUSD(metrics.totalUsd));
-  setText('insight-combined', fmtIDR(metrics.totalEq));
-  setText('insight-fx-note',
-    `Ekuivalen IDR memakai kurs asumsi 1 USD = ${fmtNum(state.config.fxUsdIdr)} IDR (bisa diubah di Pengaturan).`);
+  setText('insight-count-idr', `${fmtNum(metrics.idrCount)} transaksi`);
+  setText('insight-count-usd', `${fmtNum(metrics.usdCount)} transaksi`);
+  setText('insight-period', metrics.periodRange
+    ? `Periode: ${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}`
+    : 'Periode: —');
 }
 
 function renderKpis(metrics) {
+  setText('kpi-idr', fmtIDR(metrics.totalIdr, true));
+  setText('kpi-idr-note', metrics.idrCount
+    ? `rata-rata ${fmtIDR(metrics.avgIdr, true)} dari ${fmtNum(metrics.idrCount)} transaksi`
+    : 'tidak ada transaksi IDR');
+
+  setText('kpi-usd', fmtUSD(metrics.totalUsd, true));
+  setText('kpi-usd-note', metrics.usdCount
+    ? `rata-rata ${fmtUSD(metrics.avgUsd, true)} dari ${fmtNum(metrics.usdCount)} transaksi`
+    : 'tidak ada transaksi USD');
+
   setText('kpi-tx', fmtNum(metrics.count));
-  setText('kpi-tx-note', `${fmtNum(metrics.idrCount)} IDR · ${fmtNum(metrics.usdCount)} USD`);
+  setText('kpi-tx-note', `${fmtNum(metrics.idrCount)} IDR · ${fmtNum(metrics.usdCount)} USD${metrics.otherCount ? ` · ${fmtNum(metrics.otherCount)} lain` : ''}`);
 
   setText('kpi-vol', fmtNum(metrics.volume));
   setText('kpi-vol-note', metrics.count ? `rata-rata ${fmtNum(metrics.volume / metrics.count)} per transaksi` : '—');
 
-  setText('kpi-avg', fmtIDR(metrics.avg, true));
-  setText('kpi-avg-note', metrics.medianIdr ? `median IDR ${fmtIDR(metrics.medianIdr, true)}` : '—');
-
   setText('kpi-entities', fmtNum(metrics.entities));
-  setText('kpi-entities-note', metrics.payers.length ? `top-1 menyumbang ${metrics.concentration.toFixed(1)}%` : '—');
+  setText('kpi-entities-note', metrics.payers.length
+    ? `top-1: ${fmtPct(metrics.shareIdr)} (IDR) · ${fmtPct(metrics.shareUsd)} (USD)`
+    : '—');
 
   setText('kpi-satker', fmtNum(metrics.satkers.length));
-  setText('kpi-satker-note', metrics.satkers.length ? metrics.satkers[0].name : '—');
+  const satkerNote = $('#kpi-satker-note');
+  if (satkerNote) {
+    const top = rankList(metrics.satkers)[0];
+    satkerNote.textContent = top ? top.name : '—';
+    satkerNote.title = top ? top.name : '';
+  }
 }
 
 function updateProfileCaption(metrics) {
@@ -1888,14 +2286,12 @@ function updateProfileCaption(metrics) {
     ? `${fmtDateShort(metrics.periodRange.from)} – ${fmtDateShort(metrics.periodRange.to)}`
     : 'tanpa tanggal';
   setText('profile-caption',
-    `${fmtNum(state.view.length)} baris · ${fmtNum(state.rows.length)} total dimuat · ${range}`);
+    `${fmtNum(state.view.length)} baris tampil · ${fmtNum(state.rows.length)} dimuat · ${range}`);
 }
 
 /* ----------------------------------------------------------------------------
  * 9. RENDER: CHART
  * --------------------------------------------------------------------------*/
-const fmtTooltipAmount = (row) => `${row.currency === 'USD' ? fmtUSD(row.amount) : fmtIDR(row.amount)} <span class="text-gray-400">(${esc(row.currency)})</span>`;
-
 function nextPeriodKeys(lastKey, filter, count) {
   const out = [];
   const base = parseDateValue(filter === 'Month' ? `${lastKey}-01` : lastKey);
@@ -1910,115 +2306,168 @@ function nextPeriodKeys(lastKey, filter, count) {
   return out;
 }
 
+/**
+ * Panel IDR dan USD selalu dipisah (tidak pernah satu sumbu Y bersama).
+ * Bila hanya satu mata uang yang ada, panel kedua tidak dibuat.
+ */
+function dualPanels(metrics) {
+  const showIdr = metrics.hasIdr;
+  const showUsd = metrics.hasUsd;
+
+  if (showIdr && showUsd) {
+    return {
+      panels: [
+        { currency: 'IDR', gridIndex: 0, xIndex: 0, yIndex: 0, left: '7%', right: '52%' },
+        { currency: 'USD', gridIndex: 1, xIndex: 1, yIndex: 1, left: '58%', right: '3%' },
+      ],
+      grid: [
+        { left: '7%', right: '52%', top: '18%', bottom: '16%', containLabel: true },
+        { left: '58%', right: '3%', top: '18%', bottom: '16%', containLabel: true },
+      ],
+    };
+  }
+
+  const currency = showUsd ? 'USD' : 'IDR';
+  return {
+    panels: [{ currency, gridIndex: 0, xIndex: 0, yIndex: 0, left: '7%', right: '3%' }],
+    grid: [{ left: '7%', right: '3%', top: '18%', bottom: '16%', containLabel: true }],
+  };
+}
+
+function panelTitles(panels) {
+  return panels.map((panel) => ({
+    text: panel.currency === 'USD' ? 'USD (tanpa konversi)' : 'IDR (tanpa konversi)',
+    left: panels.length > 1 ? (panel.currency === 'IDR' ? '24%' : '74%') : 'center',
+    top: 0,
+    textAlign: 'center',
+    textStyle: { fontSize: 10, fontWeight: 'bold', color: panel.currency === 'USD' ? '#0000CD' : '#228B22' },
+  }));
+}
+
 function renderForecast(metrics) {
   const inst = initChart('chart-forecast');
   if (!inst) return;
 
   const note = $('#forecast-note');
   const periods = metrics.periods.filter((key) => key !== 'Tanpa tanggal');
-  const values = periods.map((key) => (metrics.series[key] ? metrics.series[key].eq : 0));
-  const horizon = state.filter === 'Year' ? 2 : 3;
-
   if (periods.length < 3) {
     emptyChart(inst, 'Butuh minimal 3 periode untuk proyeksi');
     if (note) note.textContent = 'Ubah filter ke Bulan/Tahun atau muat data dengan rentang lebih panjang.';
     return;
   }
 
-  const forecast = linearForecast(values, horizon);
-  if (!forecast) {
-    emptyChart(inst, 'Data belum cukup stabil untuk proyeksi');
-    if (note) note.textContent = '—';
-    return;
-  }
-
+  const horizon = state.filter === 'Year' ? 2 : 3;
   const futureKeys = nextPeriodKeys(periods[periods.length - 1], state.filter, horizon);
   const labels = periods.concat(futureKeys).map(fmtPeriodLabel);
-  const actual = values.concat(futureKeys.map(() => null));
-  const projected = periods.map((_, i) => (i === periods.length - 1 ? values[i] : null))
-    .concat(forecast.future.map((f) => f.value));
-  const upper = periods.map(() => null).concat(forecast.future.map((f) => f.upper));
-  const lower = periods.map(() => null).concat(forecast.future.map((f) => f.lower));
+  const { panels, grid } = dualPanels(metrics);
+  const notes = [];
 
-  inst.clear();
-  inst.setOption({
-    tooltip: {
-      ...TOOLTIP,
-      formatter: (params) => {
-        const items = params.filter((p) => p.value != null);
-        if (!items.length) return '';
-        return `<b>${items[0].axisValue}</b><br>${items.map((p) => `${p.marker} ${p.seriesName}: ${fmtIDR(p.value)}`).join('<br>')}`;
-      },
+  const xAxes = panels.map((panel) => ({
+    type: 'category',
+    gridIndex: panel.gridIndex,
+    boundaryGap: false,
+    data: labels,
+    axisLabel: { ...AXIS_LABEL, interval: labels.length > 12 ? 'auto' : 0, rotate: labels.length > 8 ? 30 : 0 },
+    axisLine: { lineStyle: { color: '#e2e8f0' } },
+    axisTick: { show: false },
+  }));
+
+  const yAxes = panels.map((panel) => ({
+    type: 'value',
+    gridIndex: panel.gridIndex,
+    axisLabel: {
+      ...AXIS_LABEL,
+      formatter: (value) => fmtAmount(value, panel.currency, true),
     },
-    legend: { bottom: 0, textStyle: { fontSize: 10, color: '#64748b' }, itemWidth: 12, itemHeight: 8 },
-    grid: { ...GRID, bottom: '20%' },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: labels,
-      axisLabel: { ...AXIS_LABEL, interval: labels.length > 16 ? 'auto' : 0, rotate: labels.length > 10 ? 30 : 0 },
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) },
-      splitLine: SPLIT_LINE,
-      axisLine: { show: false },
-    },
-    series: [
-      {
-        name: 'Batas bawah 95%',
+    splitLine: SPLIT_LINE,
+    axisLine: { show: false },
+  }));
+
+  const series = [];
+  panels.forEach((panel) => {
+    const key = panel.currency === 'USD' ? 'usd' : 'idr';
+    const values = periods.map((period) => (metrics.series[period] ? metrics.series[period][key] : 0));
+    const forecast = linearForecast(values, horizon);
+
+    if (!forecast) {
+      notes.push(`${panel.currency}: data belum cukup stabil untuk diproyeksikan.`);
+      series.push({
+        name: `Aktual ${panel.currency}`,
         type: 'line',
-        data: lower,
-        symbol: 'none',
-        lineStyle: { opacity: 0 },
-        areaStyle: { opacity: 0 },
-        stack: 'band',
-        silent: true,
-      },
-      {
-        name: 'Batas atas 95%',
-        type: 'line',
-        data: upper.map((v, i) => (v == null ? null : v - (lower[i] || 0))),
-        symbol: 'none',
-        lineStyle: { opacity: 0 },
-        areaStyle: { color: 'rgba(147,51,234,.08)' },
-        stack: 'band',
-        silent: true,
-      },
-      {
-        name: 'Aktual',
-        type: 'line',
-        data: actual,
-        smooth: false,
+        xAxisIndex: panel.xIndex,
+        yAxisIndex: panel.yIndex,
+        data: values.map((v) => (v > 0 ? v : null)),
         symbol: 'circle',
         symbolSize: 5,
-        lineStyle: { width: 2.5, color: '#0000CD' },
-        itemStyle: { color: '#0000CD' },
-        areaStyle: { color: 'rgba(0,0,205,.06)' },
-      },
-      {
-        name: 'Proyeksi',
-        type: 'line',
-        data: projected,
-        smooth: false,
-        symbol: 'circle',
-        symbolSize: 5,
-        lineStyle: { width: 2.5, type: 'dashed', color: '#9333ea' },
-        itemStyle: { color: '#9333ea' },
-      },
-    ],
+        lineStyle: { width: 2.5, color: panel.currency === 'USD' ? '#0000CD' : '#228B22' },
+        itemStyle: { color: panel.currency === 'USD' ? '#0000CD' : '#228B22' },
+      });
+      return;
+    }
+
+    const actual = values.map((v) => (v > 0 ? v : null)).concat(futureKeys.map(() => null));
+    const projected = periods.map((_, i) => (i === periods.length - 1 ? (values[i] || 0) : null))
+      .concat(forecast.future.map((f) => f.value));
+    const upper = periods.map(() => null).concat(forecast.future.map((f) => f.upper));
+    const lower = periods.map(() => null).concat(forecast.future.map((f) => f.lower));
+
+    series.push({
+      name: `Batas bawah ${panel.currency}`,
+      type: 'line',
+      xAxisIndex: panel.xIndex,
+      yAxisIndex: panel.yIndex,
+      data: lower,
+      symbol: 'none',
+      lineStyle: { opacity: 0 },
+      areaStyle: { opacity: 0 },
+      stack: `band-${panel.currency}`,
+      silent: true,
+    });
+    series.push({
+      name: `Batas atas ${panel.currency}`,
+      type: 'line',
+      xAxisIndex: panel.xIndex,
+      yAxisIndex: panel.yIndex,
+      data: upper.map((v, i) => (v == null ? null : v - (lower[i] || 0))),
+      symbol: 'none',
+      lineStyle: { opacity: 0 },
+      areaStyle: { color: 'rgba(147,51,234,.10)' },
+      stack: `band-${panel.currency}`,
+      silent: true,
+    });
+    series.push({
+      name: `Aktual ${panel.currency}`,
+      type: 'line',
+      xAxisIndex: panel.xIndex,
+      yAxisIndex: panel.yIndex,
+      data: actual,
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { width: 2.5, color: panel.currency === 'USD' ? '#0000CD' : '#228B22' },
+      itemStyle: { color: panel.currency === 'USD' ? '#0000CD' : '#228B22' },
+      areaStyle: { color: panel.currency === 'USD' ? 'rgba(0,0,205,.06)' : 'rgba(34,139,34,.06)' },
+    });
+    series.push({
+      name: `Proyeksi ${panel.currency}`,
+      type: 'line',
+      xAxisIndex: panel.xIndex,
+      yAxisIndex: panel.yIndex,
+      data: projected,
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { width: 2.5, type: 'dashed', color: '#9333ea' },
+      itemStyle: { color: '#9333ea' },
+    });
+
+    const next = forecast.future[0];
+    const last = values[values.length - 1] || 0;
+    const delta = last > 0 ? ((next.value - last) / last) * 100 : 0;
+    const dir = forecast.slope > 0 ? 'naik' : forecast.slope < 0 ? 'turun' : 'datar';
+    notes.push(`${panel.currency}: ${dir} (R² ${forecast.r2.toFixed(2)}) · proyeksi ${fmtPeriodLabel(futureKeys[0])} `
+      + `${fmtAmount(next.value, panel.currency)} (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%)`);
   });
 
-  const next = forecast.future[0];
-  const last = values[values.length - 1] || 0;
-  const delta = last > 0 ? ((next.value - last) / last) * 100 : 0;
-  const dir = forecast.slope > 0 ? 'naik' : forecast.slope < 0 ? 'turun' : 'datar';
-
-  // Peringatan bila periode terakhir tampak belum lengkap (jumlah transaksi jauh
-  // di bawah median), karena ini membuat arah tren mudah menyesatkan.
-  const counts = periods.map((key) => (metrics.series[key] ? metrics.series[key].count : 0));
+  const counts = periods.map((period) => (metrics.series[period] ? metrics.series[period].count : 0));
   const sortedCounts = counts.slice().sort((a, b) => a - b);
   const medianCount = sortedCounts[Math.floor(sortedCounts.length / 2)] || 0;
   const lastCount = counts[counts.length - 1] || 0;
@@ -2027,11 +2476,27 @@ function renderForecast(metrics) {
       + `(median ${fmtNum(medianCount)}), kemungkinan belum lengkap sehingga arah tren bisa bias.`
     : '';
 
-  if (note) {
-    note.textContent = `Tren ${dir} · R² ${forecast.r2.toFixed(2)} · proyeksi ${fmtPeriodLabel(futureKeys[0])}: `
-      + `${fmtIDR(next.value)} (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% vs periode terakhir), `
-      + `rentang 95% ${fmtIDR(next.lower, true)} – ${fmtIDR(next.upper, true)}.${partialNote}`;
-  }
+  inst.clear();
+  inst.setOption({
+    title: panelTitles(panels),
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const items = params.filter((p) => p.value != null);
+        if (!items.length) return '';
+        const panel = panels[params[0].seriesIndex >= 0 ? Math.min(panels.length - 1, params[0].seriesIndex > 3 ? 1 : 0) : 0];
+        return `<b>${items[0].axisValue}</b><br>${items
+          .map((p) => `${p.marker} ${esc(p.seriesName)}: ${fmtAmount(p.value, panel.currency)}`)
+          .join('<br>')}`;
+      },
+    },
+    grid,
+    xAxis: xAxes,
+    yAxis: yAxes,
+    series,
+  });
+
+  if (note) note.textContent = notes.join(' · ') + partialNote;
 }
 
 function renderAnomalies(metrics) {
@@ -2042,7 +2507,7 @@ function renderAnomalies(metrics) {
   if (!items.length) {
     container.innerHTML = `
       <div class="p-3 rounded-lg border border-green-100 bg-green-50 text-[11px] text-green-800 leading-relaxed">
-        <strong>Tidak ada anomali.</strong> Semua nilai berada dalam 3 standar deviasi dari rata-rata per mata uang.
+        <strong>Tidak ada anomali.</strong> Semua nilai berada dalam 3 standar deviasi dari rata-rata mata uangnya masing-masing.
       </div>`;
   } else {
     container.innerHTML = items.map(({ row, z }) => `
@@ -2051,13 +2516,13 @@ function renderAnomalies(metrics) {
           <span class="font-bold text-red-800 truncate" title="${esc(row.payer)}">${esc(row.payer || '(tanpa nama)')}</span>
           <span class="chip chip-bad shrink-0">z ${z.toFixed(1)}</span>
         </div>
-        <p class="text-[10px] text-gray-600 mt-0.5 truncate" title="${esc(row.satker)}">${esc(fmtDateShort(row.dateISO))} · ${esc(row.satker || '—')}</p>
-        <p class="font-extrabold text-red-700 mt-1 num">${esc(fmtAmount(row.amount, row.currency))}</p>
+        <p class="text-[10px] text-gray-600 mt-0.5 truncate" title="${esc(row.satkerRaw)}">${esc(fmtDateShort(row.dateISO))} · ${esc(row.satkerRaw || '—')}</p>
+        <p class="font-extrabold text-red-700 mt-1 num">${esc(fmtAmount(row.amount, row.currency))} <span class="text-[9px] font-normal text-gray-500">${esc(row.currency)}</span></p>
       </div>`).join('');
   }
 
-  setText('anomaly-note', `${metrics.anomalies.length} transaksi di luar |z| > 3`);
-  setText('layanan-kpi-3', fmtNum(metrics.anomalies.length));
+  setText('anomaly-note', `${metrics.anomalies.length} transaksi di luar |z| > 3 (per mata uang).`);
+  setText('ntpn-kpi-3', fmtNum(metrics.anomalies.length));
 }
 
 function renderTrend(metrics) {
@@ -2067,101 +2532,72 @@ function renderTrend(metrics) {
   if (!periods.length) { emptyChart(inst); return; }
 
   const log = state.trendLog;
-  const idr = periods.map((key) => (metrics.series[key] ? metrics.series[key].idr : 0));
-  const usd = periods.map((key) => (metrics.series[key] ? metrics.series[key].usd : 0));
-  const vol = periods.map((key) => (metrics.series[key] ? metrics.series[key].volume : 0));
-  const scale = (arr) => (log ? arr.map((v) => Math.max(1, v)) : arr);
+  const { panels, grid } = dualPanels(metrics);
+
+  const xAxes = panels.map((panel) => ({
+    type: 'category',
+    gridIndex: panel.gridIndex,
+    boundaryGap: true,
+    data: periods.map(fmtPeriodLabel),
+    axisLabel: { ...AXIS_LABEL, interval: periods.length > 14 ? 'auto' : 0, rotate: periods.length > 8 ? 30 : 0 },
+    axisLine: { lineStyle: { color: '#e2e8f0' } },
+    axisTick: { show: false },
+  }));
+
+  const yAxes = panels.map((panel) => ({
+    type: log ? 'log' : 'value',
+    gridIndex: panel.gridIndex,
+    axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtAmount(value, panel.currency, true) },
+    splitLine: SPLIT_LINE,
+  }));
+
+  const series = panels.map((panel) => {
+    const key = panel.currency === 'USD' ? 'usd' : 'idr';
+    const data = periods.map((period) => {
+      const value = metrics.series[period] ? metrics.series[period][key] : 0;
+      return log ? Math.max(1, value) : value;
+    });
+    return {
+      name: panel.currency,
+      type: 'bar',
+      xAxisIndex: panel.xIndex,
+      yAxisIndex: panel.yIndex,
+      data,
+      barMaxWidth: 26,
+      itemStyle: { color: panel.currency === 'USD' ? '#0000CD' : '#228B22', borderRadius: [4, 4, 0, 0] },
+    };
+  });
 
   inst.clear();
   inst.setOption({
+    title: panelTitles(panels),
     tooltip: {
       ...TOOLTIP,
       formatter: (params) => {
-        const idx = params[0] ? params[0].dataIndex : 0;
-        const key = periods[idx];
-        const bucket = metrics.series[key] || { idr: 0, usd: 0, volume: 0, count: 0 };
-        return `<b>${fmtPeriodLabel(key)}</b><br>
+        const index = params[0] ? params[0].dataIndex : 0;
+        const period = periods[index];
+        const bucket = metrics.series[period] || { idr: 0, usd: 0, count: 0, volume: 0 };
+        return `<b>${fmtPeriodLabel(period)}</b><br>
           <span class="text-gray-500">Transaksi:</span> ${fmtNum(bucket.count)}<br>
           <span class="text-gray-500">IDR:</span> ${fmtIDR(bucket.idr)}<br>
           <span class="text-gray-500">USD:</span> ${fmtUSD(bucket.usd)}<br>
           <span class="text-gray-500">Volume:</span> ${fmtNum(bucket.volume)}`;
       },
     },
-    legend: {
-      bottom: 0,
-      textStyle: { fontSize: 10, color: '#64748b' },
-      itemWidth: 12,
-      itemHeight: 8,
-      data: ['Setoran IDR', 'Setoran USD', 'Volume'],
-      selected: { Volume: false },
-    },
-    grid: { ...GRID, bottom: '22%' },
-    xAxis: {
-      type: 'category',
-      boundaryGap: !log,
-      data: periods.map(fmtPeriodLabel),
-      axisLabel: { ...AXIS_LABEL, interval: periods.length > 16 ? 'auto' : 0, rotate: periods.length > 10 ? 30 : 0 },
-      axisLine: { lineStyle: { color: '#e2e8f0' } },
-      axisTick: { show: false },
-    },
-    yAxis: [
-      {
-        type: log ? 'log' : 'value',
-        name: 'IDR',
-        nameTextStyle: { color: '#94a3b8', fontSize: 9 },
-        axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) },
-        splitLine: SPLIT_LINE,
-      },
-      {
-        type: log ? 'log' : 'value',
-        name: 'USD',
-        nameTextStyle: { color: '#94a3b8', fontSize: 9 },
-        axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtUSD(v, true) },
-        splitLine: { show: false },
-      },
-      { type: 'value', show: false },
-    ],
-    series: [
-      {
-        name: 'Setoran IDR',
-        type: log ? 'line' : 'bar',
-        yAxisIndex: 0,
-        data: scale(idr),
-        barMaxWidth: 26,
-        lineStyle: { width: 2.5, color: '#0000CD' },
-        itemStyle: log ? { color: '#0000CD' } : { color: '#0000CD', borderRadius: [4, 4, 0, 0] },
-        symbol: 'circle',
-        symbolSize: 5,
-      },
-      {
-        name: 'Setoran USD',
-        type: 'line',
-        yAxisIndex: 1,
-        data: scale(usd),
-        smooth: false,
-        symbol: 'circle',
-        symbolSize: 5,
-        lineStyle: { width: 2.5, color: '#228B22' },
-        itemStyle: { color: '#228B22' },
-      },
-      {
-        name: 'Volume',
-        type: 'line',
-        yAxisIndex: 2,
-        data: vol,
-        smooth: false,
-        symbol: 'none',
-        lineStyle: { width: 1.5, type: 'dashed', color: '#94a3b8' },
-        itemStyle: { color: '#94a3b8' },
-      },
-    ],
+    grid,
+    xAxis: xAxes,
+    yAxis: yAxes,
+    series,
   });
 }
 
 function renderTopSatker(metrics) {
   const inst = initChart('chart-top-satker');
   if (!inst) return;
-  const top = metrics.satkers.slice(0, 8).reverse();
+  const top = rankList(metrics.satkers).slice(0, 8).reverse();
+  const caption = $('#top-satker-caption');
+  if (caption) caption.textContent = `Diurutkan berdasarkan ${state.valueView}`;
+
   if (!top.length) { emptyChart(inst); return; }
 
   inst.clear();
@@ -2170,24 +2606,28 @@ function renderTopSatker(metrics) {
       ...TOOLTIP,
       formatter: (params) => {
         const item = top[params[0].dataIndex];
-        return `<b>${esc(item.name)}</b><br>Setoran: ${fmtIDR(item.eq)}<br>Transaksi: ${fmtNum(item.count)}`;
+        return `<b>${esc(item.name)}</b><br>IDR: ${fmtIDR(item.idr)}<br>USD: ${fmtUSD(item.usd)}<br>Transaksi: ${fmtNum(item.count)}`;
       },
     },
-    grid: { top: '4%', left: '2%', right: '6%', bottom: '4%', containLabel: true },
-    xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    grid: { top: '4%', left: '2%', right: '8%', bottom: '4%', containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtValue(value, true) },
+      splitLine: SPLIT_LINE,
+    },
     yAxis: {
       type: 'category',
-      data: top.map((s) => (s.name.length > 26 ? s.name.slice(0, 26) + '…' : s.name)),
+      data: top.map((item) => (item.name.length > 26 ? item.name.slice(0, 26) + '…' : item.name)),
       axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 150, overflow: 'truncate' },
       axisTick: { show: false },
       axisLine: { show: false },
     },
     series: [{
       type: 'bar',
-      data: top.map((s, i) => ({ value: s.eq, itemStyle: { color: colorFor(i) } })),
+      data: top.map((item, i) => ({ value: valueOfItem(item), itemStyle: { color: colorFor(i) } })),
       barMaxWidth: 18,
       itemStyle: { borderRadius: [0, 4, 4, 0] },
-      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtIDR(p.value, true) },
+      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtValue(p.value, true) },
     }],
   });
 }
@@ -2195,12 +2635,17 @@ function renderTopSatker(metrics) {
 function renderAkun(metrics) {
   const inst = initChart('chart-akun');
   if (!inst) return;
-  const items = metrics.akuns.filter((a) => a.idr > 0).slice(0, 6);
-  if (!items.length) { emptyChart(inst, 'Tidak ada setoran IDR'); return; }
+  const key = state.valueView === 'USD' ? 'usd' : 'idr';
+  const items = rankList(metrics.akuns).filter((item) => item[key] > 0).slice(0, 6);
 
-  const total = items.reduce((sum, a) => sum + a.idr, 0);
-  const rest = metrics.akuns.reduce((sum, a) => sum + a.idr, 0) - total;
-  const data = items.map((a) => ({ name: 'Akun ' + a.name, value: a.idr }));
+  if (!items.length) {
+    emptyChart(inst, `Tidak ada setoran ${state.valueView}`);
+    return;
+  }
+
+  const total = items.reduce((sum, item) => sum + item[key], 0);
+  const rest = metrics.akuns.reduce((sum, item) => sum + item[key], 0) - total;
+  const data = items.map((item) => ({ name: 'Akun ' + item.name, value: item[key] }));
   if (rest > 0) data.push({ name: 'Akun lain', value: rest });
 
   inst.clear();
@@ -2210,10 +2655,16 @@ function renderAkun(metrics) {
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#e2e8f0',
       textStyle: { color: '#0f172a', fontSize: 11 },
-      formatter: (p) => `${esc(p.name)}<br>${fmtIDR(p.value)} (${p.percent}%)`,
+      formatter: (p) => `${esc(p.name)}<br>${fmtValue(p.value)} (${p.percent}%)`,
     },
     legend: { bottom: 0, icon: 'circle', textStyle: { fontSize: 9 }, itemWidth: 8, itemHeight: 8 },
     color: ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#cbd5e1'],
+    title: {
+      text: state.valueView,
+      left: 'center',
+      top: '36%',
+      textStyle: { fontSize: 11, color: '#94a3b8', fontWeight: 'normal' },
+    },
     series: [{
       type: 'pie',
       radius: ['42%', '66%'],
@@ -2233,9 +2684,10 @@ function renderCumulative(metrics) {
   const periods = metrics.periods;
   if (!periods.length) { emptyChart(inst); return; }
 
+  const key = state.valueView === 'USD' ? 'usd' : 'idr';
   let running = 0;
-  const cumulative = periods.map((key) => {
-    running += metrics.series[key] ? metrics.series[key].eq : 0;
+  const cumulative = periods.map((period) => {
+    running += metrics.series[period] ? metrics.series[period][key] : 0;
     return running;
   });
 
@@ -2244,8 +2696,8 @@ function renderCumulative(metrics) {
     tooltip: {
       ...TOOLTIP,
       formatter: (params) => {
-        const idx = params[0].dataIndex;
-        return `<b>${fmtPeriodLabel(periods[idx])}</b><br>Kumulatif: ${fmtIDR(cumulative[idx])}`;
+        const index = params[0].dataIndex;
+        return `<b>${fmtPeriodLabel(periods[index])}</b><br>Kumulatif ${state.valueView}: ${fmtValue(cumulative[index])}`;
       },
     },
     grid: { ...GRID, bottom: '18%' },
@@ -2257,19 +2709,19 @@ function renderCumulative(metrics) {
       axisLine: { lineStyle: { color: '#e2e8f0' } },
       axisTick: { show: false },
     },
-    yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtValue(value, true) }, splitLine: SPLIT_LINE },
     series: [{
       type: 'line',
       data: cumulative,
       smooth: false,
       symbol: 'none',
-      lineStyle: { width: 2.5, color: '#228B22' },
+      lineStyle: { width: 2.5, color: state.valueView === 'USD' ? '#0000CD' : '#228B22' },
       areaStyle: {
         color: {
           type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(34,139,34,.28)' },
-            { offset: 1, color: 'rgba(34,139,34,.02)' },
+            { offset: 0, color: state.valueView === 'USD' ? 'rgba(0,0,205,.20)' : 'rgba(34,139,34,.28)' },
+            { offset: 1, color: 'rgba(148,163,184,.02)' },
           ],
         },
       },
@@ -2278,130 +2730,138 @@ function renderCumulative(metrics) {
 }
 
 function renderTopEntity(metrics) {
-  const top = metrics.payers[0];
+  const ranked = rankList(metrics.payers);
+  const top = ranked[0];
+  const chip = $('#top-entity-chip');
+  if (chip) chip.textContent = `#1 SETORAN TERBESAR (${state.valueView})`;
+
   if (!top) {
     setText('top-entity-name', '—');
     setText('top-entity-satker', '—');
     setText('top-entity-idr', 'Rp 0');
     setText('top-entity-usd', '$ 0');
     setText('top-entity-tx', '0');
-    setText('top-entity-share', '0%');
+    setText('top-entity-share', '0% / 0%');
     return;
   }
 
-  const row = metrics.rows.find((r) => r.payer === top.name) || {};
+  const row = metrics.rows.find((item) => item.payer === top.name) || {};
   const nameEl = $('#top-entity-name');
   if (nameEl) {
     nameEl.textContent = top.name;
     nameEl.title = top.name;
   }
-  setText('top-entity-satker', row.satker || '—');
+  setText('top-entity-satker', row.satkerRaw || '—');
   setText('top-entity-idr', top.idr > 0 ? fmtIDR(top.idr) : '—');
   setText('top-entity-usd', top.usd > 0 ? fmtUSD(top.usd) : '—');
   setText('top-entity-tx', fmtNum(top.count) + ' trx');
-  setText('top-entity-share', `${((top.eq / (metrics.totalEq || 1)) * 100).toFixed(1)}%`);
-  const shareEl = $('#top-entity-share');
-  if (shareEl) shareEl.title = `Dihitung dari ekuivalen IDR (1 USD = ${fmtNum(state.config.fxUsdIdr)} IDR).`;
+
+  const shareIdr = metrics.totalIdr > 0 ? (top.idr / metrics.totalIdr) * 100 : 0;
+  const shareUsd = metrics.totalUsd > 0 ? (top.usd / metrics.totalUsd) * 100 : 0;
+  setText('top-entity-share', `${shareIdr.toFixed(1)}% / ${shareUsd.toFixed(1)}%`);
 }
 
-/* --------------------------- satker / layanan / payer --------------------------- */
+/* --------------------------- satker / NTPN / payer --------------------------- */
 function renderSatkerSection(metrics) {
   setText('satker-kpi-1', fmtNum(metrics.satkers.length));
-  setText('satker-kpi-2', fmtIDR(metrics.satkers.length ? metrics.totalEq / metrics.satkers.length : 0, true));
+  setText('satker-kpi-2', fmtIDR(metrics.satkers.length ? metrics.totalIdr / metrics.satkers.length : 0, true));
 
   const topEl = $('#satker-kpi-3');
+  const top = rankList(metrics.satkers)[0];
   if (topEl) {
-    topEl.textContent = metrics.satkers[0] ? metrics.satkers[0].name : '—';
+    topEl.textContent = top ? top.name : '—';
     topEl.title = topEl.textContent;
   }
+
+  const caption = $('#satker-chart-caption');
+  if (caption) caption.textContent = `Nilai ${state.valueView}`;
 
   const inst = initChart('chart-satker-line');
-  if (inst) {
-    const top5 = metrics.satkers.slice(0, 5);
-    if (!top5.length) {
-      emptyChart(inst);
-    } else {
-      inst.clear();
-      inst.setOption({
-        tooltip: {
-          ...TOOLTIP,
-          formatter: (params) => {
-            const title = params[0] ? params[0].axisValue : '';
-            return `<b>${title}</b><br>${params.map((p) => `${p.marker} ${esc(p.seriesName)}: ${fmtIDR(p.value)}`).join('<br>')}`;
-          },
-        },
-        legend: {
-          top: 0,
-          type: 'scroll',
-          textStyle: { fontSize: 9, color: '#64748b' },
-          itemWidth: 10,
-          itemHeight: 8,
-          data: top5.map((s) => (s.name.length > 22 ? s.name.slice(0, 22) + '…' : s.name)),
-        },
-        grid: { ...GRID, top: '20%', bottom: '14%' },
-        xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: metrics.periods.map(fmtPeriodLabel),
-          axisLabel: { ...AXIS_LABEL, interval: metrics.periods.length > 14 ? 'auto' : 0, rotate: metrics.periods.length > 8 ? 30 : 0 },
-          axisLine: { lineStyle: { color: '#e2e8f0' } },
-          axisTick: { show: false },
-        },
-        yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
-        color: top5.map((_, i) => colorFor(i)),
-        series: top5.map((satker) => ({
-          name: satker.name.length > 22 ? satker.name.slice(0, 22) + '…' : satker.name,
-          type: 'line',
-          smooth: false,
-          symbol: 'circle',
-          symbolSize: 5,
-          data: metrics.periods.map((key) => (satker.periods[key] || 0)),
-          lineStyle: { width: 2 },
-        })),
-      });
-    }
-  }
+  if (!inst) return;
+
+  const top5 = rankList(metrics.satkers).slice(0, 5);
+  if (!top5.length) { emptyChart(inst); return; }
+
+  const key = state.valueView === 'USD' ? 'usd' : 'idr';
+  inst.clear();
+  inst.setOption({
+    tooltip: {
+      ...TOOLTIP,
+      formatter: (params) => {
+        const title = params[0] ? params[0].axisValue : '';
+        return `<b>${title}</b><br>${params.map((p) => `${p.marker} ${esc(p.seriesName)}: ${fmtValue(p.value)}`).join('<br>')}`;
+      },
+    },
+    legend: {
+      top: 0,
+      type: 'scroll',
+      textStyle: { fontSize: 9, color: '#64748b' },
+      itemWidth: 10,
+      itemHeight: 8,
+      data: top5.map((item) => (item.name.length > 22 ? item.name.slice(0, 22) + '…' : item.name)),
+    },
+    grid: { ...GRID, top: '20%', bottom: '14%' },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: metrics.periods.map(fmtPeriodLabel),
+      axisLabel: { ...AXIS_LABEL, interval: metrics.periods.length > 14 ? 'auto' : 0, rotate: metrics.periods.length > 8 ? 30 : 0 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+      axisTick: { show: false },
+    },
+    yAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtValue(value, true) }, splitLine: SPLIT_LINE },
+    color: top5.map((_, i) => colorFor(i)),
+    series: top5.map((satker) => ({
+      name: satker.name.length > 22 ? satker.name.slice(0, 22) + '…' : satker.name,
+      type: 'line',
+      smooth: false,
+      symbol: 'circle',
+      symbolSize: 5,
+      data: metrics.periods.map((period) => (satker.periods[period] ? satker.periods[period][key] : 0)),
+      lineStyle: { width: 2 },
+    })),
+  });
 }
 
-function renderLayananSection(metrics) {
-  setText('layanan-kpi-1', fmtNum(metrics.layanans.length));
-  const topEl = $('#layanan-kpi-2');
+function renderNtpnSection(metrics) {
+  setText('ntpn-kpi-1', fmtNum(metrics.ntpns.length));
+  const topEl = $('#ntpn-kpi-2');
+  const top = rankList(metrics.ntpns)[0];
   if (topEl) {
-    topEl.textContent = metrics.layanans[0] ? metrics.layanans[0].name : '—';
+    topEl.textContent = top ? top.name : '—';
     topEl.title = topEl.textContent;
   }
-  setText('layanan-kpi-3', fmtNum(metrics.anomalies.length));
+  setText('ntpn-kpi-3', fmtNum(metrics.anomalies.length));
 
-  const inst = initChart('chart-layanan-bar');
+  const inst = initChart('chart-ntpn-bar');
   if (!inst) return;
-  const top = metrics.layanans.slice(0, 10).reverse();
-  if (!top.length) { emptyChart(inst); return; }
+  const top10 = rankList(metrics.ntpns).slice(0, 10).reverse();
+  if (!top10.length) { emptyChart(inst); return; }
 
   inst.clear();
   inst.setOption({
     tooltip: {
       ...TOOLTIP,
       formatter: (params) => {
-        const item = top[params[0].dataIndex];
-        return `<b>${esc(item.name)}</b><br>Setoran (ekuivalen): ${fmtIDR(item.eq)}<br>
-          IDR: ${fmtIDR(item.idr)}<br>USD: ${fmtUSD(item.usd)}<br>Transaksi: ${fmtNum(item.count)}`;
+        const item = top10[params[0].dataIndex];
+        return `<b>${esc(item.name)}</b><br>IDR: ${fmtIDR(item.idr)}<br>USD: ${fmtUSD(item.usd)}<br>Transaksi: ${fmtNum(item.count)}`;
       },
     },
-    grid: { top: '4%', left: '2%', right: '8%', bottom: '4%', containLabel: true },
-    xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (v) => fmtIDR(v, true) }, splitLine: SPLIT_LINE },
+    grid: { top: '4%', left: '2%', right: '10%', bottom: '4%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtValue(value, true) }, splitLine: SPLIT_LINE },
     yAxis: {
       type: 'category',
-      data: top.map((s) => (s.name.length > 30 ? s.name.slice(0, 30) + '…' : s.name)),
-      axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 190, overflow: 'truncate' },
+      data: top10.map((item) => (item.name.length > 42 ? item.name.slice(0, 42) + '…' : item.name)),
+      axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 260, overflow: 'truncate' },
       axisTick: { show: false },
       axisLine: { show: false },
     },
     series: [{
       type: 'bar',
-      data: top.map((s, i) => ({ value: s.eq, itemStyle: { color: colorFor(i) } })),
+      data: top10.map((item, i) => ({ value: valueOfItem(item), itemStyle: { color: colorFor(i) } })),
       barMaxWidth: 16,
       itemStyle: { borderRadius: [0, 4, 4, 0] },
-      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtIDR(p.value, true) },
+      label: { show: true, position: 'right', fontSize: 9, color: '#64748b', formatter: (p) => fmtValue(p.value, true) },
     }],
   });
 }
@@ -2409,19 +2869,21 @@ function renderLayananSection(metrics) {
 function renderPayerSection(metrics) {
   setText('payer-kpi-1', fmtNum(metrics.payers.length));
   const topEl = $('#payer-kpi-2');
+  const top = rankList(metrics.payers)[0];
   if (topEl) {
-    topEl.textContent = metrics.payers[0] ? metrics.payers[0].name : '—';
+    topEl.textContent = top ? top.name : '—';
     topEl.title = topEl.textContent;
   }
-  setText('payer-kpi-3', `${metrics.concentration.toFixed(1)}%`);
+  setText('payer-kpi-3', `${fmtPct(metrics.shareIdr)} / ${fmtPct(metrics.shareUsd)}`);
 
   const inst = initChart('chart-payer-pie');
   if (!inst) return;
-  const top = metrics.payers.slice(0, 7);
-  if (!top.length) { emptyChart(inst); return; }
+  const ranked = rankList(metrics.payers);
+  const items = ranked.slice(0, 7).filter((item) => valueOfItem(item) > 0);
+  if (!items.length) { emptyChart(inst, `Tidak ada setoran ${state.valueView}`); return; }
 
-  const data = top.map((p) => ({ name: p.name, value: p.eq }));
-  const rest = metrics.payers.slice(7).reduce((sum, p) => sum + p.eq, 0);
+  const data = items.map((item) => ({ name: item.name, value: valueOfItem(item) }));
+  const rest = ranked.slice(7).reduce((sum, item) => sum + valueOfItem(item), 0);
   if (rest > 0) data.push({ name: 'Lainnya', value: rest });
 
   inst.clear();
@@ -2431,7 +2893,7 @@ function renderPayerSection(metrics) {
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#e2e8f0',
       textStyle: { color: '#0f172a', fontSize: 11 },
-      formatter: (p) => `${esc(p.name)}<br>${fmtIDR(p.value)} (${p.percent}%)`,
+      formatter: (p) => `${esc(p.name)}<br>${fmtValue(p.value)} (${p.percent}%)`,
     },
     legend: {
       type: 'scroll',
@@ -2445,6 +2907,13 @@ function renderPayerSection(metrics) {
       formatter: (name) => (name.length > 22 ? name.slice(0, 22) + '…' : name),
     },
     color: ['#0000CD', '#228B22', '#4169E1', '#32CD32', '#808080', '#7C3AED', '#DC2626', '#cbd5e1'],
+    title: {
+      text: state.valueView,
+      left: '30%',
+      top: '44%',
+      textAlign: 'center',
+      textStyle: { fontSize: 11, color: '#94a3b8', fontWeight: 'normal' },
+    },
     series: [{
       type: 'pie',
       radius: ['42%', '68%'],
@@ -2454,6 +2923,159 @@ function renderPayerSection(metrics) {
       emphasis: { label: { show: true, fontSize: 11, fontWeight: 'bold', formatter: '{b}\n{d}%' } },
       data,
     }],
+  });
+}
+
+/* ----------------------------------------------------------------------------
+ * 10. RENDER: TARGET VS REALISASI
+ * --------------------------------------------------------------------------*/
+function renderTargetSection(metrics, evaluation) {
+  const view = state.valueView;
+  const summary = evaluation.summary;
+  const targetTotal = view === 'USD' ? summary.targetUsd : summary.targetIdr;
+  const realTotal = view === 'USD' ? summary.realUsd : summary.realIdr;
+  const progress = targetTotal > 0 ? (realTotal / targetTotal) * 100 : null;
+
+  setText('target-kpi-1', fmtNum(summary.count));
+  setText('target-kpi-1-note', evaluation.mode === 'sheet'
+    ? `${summary.matched} target tercocokkan dengan data`
+    : 'Sheet target tidak ditemukan');
+
+  setText('target-kpi-2', progress == null ? '—' : fmtPct(progress));
+  setText('target-kpi-2-note', targetTotal > 0
+    ? `Realisasi ${fmtValue(realTotal, true)} dari target ${fmtValue(targetTotal, true)}`
+      + (summary.basis === 'total' ? ' (target tingkat total)' : ' (jumlah target per unit)')
+    : `Tidak ada target ${view}`);
+
+  setText('target-kpi-3', targetTotal > 0 ? fmtValue(targetTotal - realTotal, true) : '—');
+  setText('target-kpi-3-note', targetTotal > 0
+    ? (targetTotal - realTotal > 0 ? 'Masih kurang dari target' : 'Melebihi target')
+    : '—');
+
+  setText('rs-target', progress == null ? '—' : `${view} ${fmtPct(progress, 0)}`);
+
+  const chip = $('#target-source-chip');
+  if (chip) {
+    const isDemo = !!(state.meta && state.meta.demo);
+    const sheets = (state.targetsMeta.sheets || []).map((item) => item.name).filter(Boolean);
+    if (isDemo) {
+      chip.textContent = 'Target contoh (demo)';
+      chip.className = 'chip chip-warn';
+    } else if (evaluation.mode === 'sheet') {
+      chip.textContent = 'Sumber: sheet target' + (sheets.length ? ' · ' + sheets.join(', ') : '');
+      chip.className = 'chip chip-ok';
+    } else if (evaluation.mode === 'baseline') {
+      chip.textContent = 'Pembanding otomatis (bukan target resmi)';
+      chip.className = 'chip chip-warn';
+    } else {
+      chip.textContent = 'Target tidak ditemukan';
+      chip.className = 'chip chip-muted';
+    }
+  }
+
+  const methodNote = $('#target-method-note');
+  if (methodNote) {
+    methodNote.textContent = evaluation.mode === 'sheet'
+      ? (state.targetsMeta.note
+        || 'Target dibaca dari sheet target di spreadsheet, dicocokkan otomatis memakai kode satker, nama satker, wajib bayar, atau NTPN. Realisasi dihitung dari seluruh baris pada periode target.')
+      : (state.targetsMeta.note
+        || 'Belum ada sheet target. Dashboard memakai realisasi periode sebelumnya sebagai pembanding otomatis.');
+  }
+
+  // Chart: peringkat target pada mata uang tampilan
+  const inst = initChart('chart-target');
+  if (inst) {
+    const items = evaluation.items
+      .filter((item) => item.currency === view && item.target > 0)
+      .sort((a, b) => b.target - a.target)
+      .slice(0, 8)
+      .reverse();
+
+    const caption = $('#target-chart-caption');
+    if (caption) caption.textContent = `Mata uang ${view}`;
+
+    if (!items.length) {
+      emptyChart(inst, `Tidak ada target ${view}`);
+    } else {
+      inst.clear();
+      inst.setOption({
+        tooltip: {
+          ...TOOLTIP,
+          formatter: (params) => {
+            const item = items[params[0].dataIndex];
+            return `<b>${esc(item.label)}</b><br>
+              Target: ${fmtValue(item.target)}<br>
+              Realisasi: ${fmtValue(item.realized)}<br>
+              Capaian: ${item.progress == null ? '—' : fmtPct(item.progress)}<br>
+              Periode: ${esc(item.periodKey || 'semua')}`;
+          },
+        },
+        legend: { top: 0, textStyle: { fontSize: 10 }, itemWidth: 12, itemHeight: 8 },
+        grid: { top: '14%', left: '2%', right: '6%', bottom: '4%', containLabel: true },
+        xAxis: { type: 'value', axisLabel: { ...AXIS_LABEL, formatter: (value) => fmtValue(value, true) }, splitLine: SPLIT_LINE },
+        yAxis: {
+          type: 'category',
+          data: items.map((item) => (item.label.length > 30 ? item.label.slice(0, 30) + '…' : item.label)),
+          axisLabel: { ...AXIS_LABEL, fontSize: 9, width: 200, overflow: 'truncate' },
+          axisTick: { show: false },
+          axisLine: { show: false },
+        },
+        series: [
+          {
+            name: 'Target',
+            type: 'bar',
+            data: items.map((item) => item.target),
+            barMaxWidth: 12,
+            itemStyle: { color: '#cbd5e1', borderRadius: [0, 3, 3, 0] },
+          },
+          {
+            name: 'Realisasi',
+            type: 'bar',
+            data: items.map((item) => item.realized),
+            barMaxWidth: 12,
+            itemStyle: { color: view === 'USD' ? '#0000CD' : '#228B22', borderRadius: [0, 3, 3, 0] },
+            label: {
+              show: true,
+              position: 'right',
+              fontSize: 9,
+              color: '#64748b',
+              formatter: (p) => {
+                const item = items[p.dataIndex];
+                return item && item.progress != null ? `${item.progress.toFixed(0)}%` : '—';
+              },
+            },
+          },
+        ],
+      });
+    }
+  }
+
+  // Tabel target (semua mata uang, urut capaian terendah agar yang perlu
+  // perhatian muncul lebih dulu)
+  const rows = evaluation.items.slice().sort((a, b) => {
+    const pa = a.progress == null ? -1 : a.progress;
+    const pb = b.progress == null ? -1 : b.progress;
+    return pa - pb;
+  });
+
+  tables.target.setRows(rows, (item) => {
+    const status = TARGET_STATUS[item.status] || TARGET_STATUS.none;
+    return `<tr class="hover:bg-gray-50 transition-colors">
+      <td class="p-2.5">
+        <span class="truncate-cell font-medium text-gray-900" title="${esc(item.label)}">${esc(item.label)}</span>
+        <span class="truncate-cell text-[9px] text-gray-400">${esc(item.matchType)}${item.note ? ' · ' + esc(item.note) : ''}</span>
+      </td>
+      <td class="p-2.5 text-[10px] text-gray-600 whitespace-nowrap">${esc(item.periodKey || 'semua')}</td>
+      <td class="p-2.5 text-right num text-[11px] whitespace-nowrap">
+        <div class="${item.currency === 'USD' ? 'text-[#0000CD]' : 'text-[#228B22]'}">${esc(fmtAmount(item.target, item.currency, true))}</div>
+        <div class="text-[9px] text-gray-400">${esc(item.currency)}</div>
+      </td>
+      <td class="p-2.5 text-right num text-[11px] whitespace-nowrap">${esc(fmtAmount(item.realized, item.currency, true))}</td>
+      <td class="p-2.5 text-right num text-[11px] font-bold ${item.progress != null && item.progress < 100 ? 'text-amber-600' : 'text-green-700'}">
+        ${item.progress == null ? '—' : item.progress.toFixed(0) + '%'}
+      </td>
+      <td class="p-2.5"><span class="chip ${status.cls}">${status.label}</span></td>
+    </tr>`;
   });
 }
 
@@ -2538,6 +3160,10 @@ class PagedTable {
   }
 }
 
+
+/* ----------------------------------------------------------------------------
+ * 11. TABEL: state + render (semua nominal dipisah IDR / USD)
+ * --------------------------------------------------------------------------*/
 const tables = {};
 
 function ensureTables() {
@@ -2546,25 +3172,28 @@ function ensureTables() {
       tbody: 'table-body', pagination: 'table-pagination', info: 'table-info', pageSize: 10, columns: 6,
     });
   }
-  if (!tables.satker) {
-    tables.satker = new PagedTable({ tbody: 'satker-tbody', pagination: 'satker-pagination', pageSize: 10, columns: 3 });
-  }
-  if (!tables.layanan) {
-    tables.layanan = new PagedTable({ tbody: 'layanan-tbody', pagination: 'layanan-pagination', pageSize: 10, columns: 3 });
-  }
-  if (!tables.payer) {
-    tables.payer = new PagedTable({ tbody: 'payer-tbody', pagination: 'payer-pagination', pageSize: 10, columns: 3 });
-  }
+  ['satker', 'ntpn', 'payer', 'target'].forEach((name) => {
+    if (!tables[name]) {
+      tables[name] = new PagedTable({
+        tbody: `${name}-tbody`, pagination: `${name}-pagination`, pageSize: 10, columns: name === 'target' ? 6 : 3,
+      });
+    }
+  });
 }
 
+/** Sel setoran: IDR dan USD ditampilkan terpisah, tidak dijumlahkan */
 const amountCell = (item) => {
-  if (item.idr > 0 && item.usd > 0) {
-    return `<div class="text-[#228B22]">${esc(fmtIDR(item.idr, true))}</div>
-            <div class="text-[#0000CD] text-[10px]">${esc(fmtUSD(item.usd, true))}</div>`;
+  const lines = [];
+  if (item.idr > 0) {
+    lines.push(`<div class="text-[#228B22]">${esc(fmtIDR(item.idr, true))}</div>`);
   }
-  if (item.usd > 0) return `<span class="text-[#0000CD]">${esc(fmtUSD(item.usd))}</span>`;
-  if (item.other > 0) return `<span class="text-gray-600">${esc(fmtNum(item.other))} (lain)</span>`;
-  return `<span class="text-[#228B22]">${esc(fmtIDR(item.idr))}</span>`;
+  if (item.usd > 0) {
+    lines.push(`<div class="text-[#0000CD] ${item.idr > 0 ? 'text-[10px]' : ''}">${esc(fmtUSD(item.usd, true))}</div>`);
+  }
+  if (item.other > 0) {
+    lines.push(`<div class="text-[10px] text-gray-500">${esc(fmtNum(item.other))} (lain)</div>`);
+  }
+  return lines.length ? lines.join('') : '<span class="text-gray-400">—</span>';
 };
 
 function renderTables(metrics) {
@@ -2584,8 +3213,8 @@ function renderTables(metrics) {
         <span class="truncate-cell text-[10px] text-gray-400" title="${esc(row.keterangan)}">${esc(row.keterangan || '—')}</span>
       </td>
       <td class="px-4 py-2.5 text-xs text-gray-600 whitespace-nowrap">${esc(row.dateISO ? fmtDateShort(row.dateISO) : (row.dateRaw || '—'))}</td>
-      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.satker)}">${esc(row.satker || '—')}</span></td>
-      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.layanan)}">${esc(row.layanan || '—')}</span></td>
+      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.satkerRaw)}">${esc(row.satkerRaw || '—')}</span></td>
+      <td class="px-4 py-2.5"><span class="truncate-cell text-xs text-gray-600" title="${esc(row.ntpn)}">${esc(row.ntpn || '—')}</span></td>
       <td class="px-4 py-2.5"><span class="chip chip-muted">${esc(row.akun || '—')}</span></td>
       <td class="px-4 py-2.5 text-right whitespace-nowrap">
         <span class="font-semibold text-xs ${row.currency === 'USD' ? 'text-[#0000CD]' : 'text-[#228B22]'}">${esc(fmtAmount(row.amount, row.currency))}</span>
@@ -2593,30 +3222,20 @@ function renderTables(metrics) {
       </td>
     </tr>`);
 
-  tables.satker.setRows(metrics.satkers, (item) => `
+  const rowRenderer = (item) => `
     <tr class="hover:bg-gray-50 transition-colors">
       <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
       <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
       <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
-    </tr>`);
+    </tr>`;
 
-  tables.layanan.setRows(metrics.layanans, (item) => `
-    <tr class="hover:bg-gray-50 transition-colors">
-      <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
-      <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
-      <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
-    </tr>`);
-
-  tables.payer.setRows(metrics.payers, (item) => `
-    <tr class="hover:bg-gray-50 transition-colors">
-      <td class="p-2.5"><span class="truncate-cell font-medium text-gray-900" title="${esc(item.name)}">${esc(item.name)}</span></td>
-      <td class="p-2.5 text-gray-500 num">${fmtNum(item.count)}</td>
-      <td class="p-2.5 text-right text-[11px] font-semibold">${amountCell(item)}</td>
-    </tr>`);
+  tables.satker.setRows(rankList(metrics.satkers), rowRenderer);
+  tables.ntpn.setRows(rankList(metrics.ntpns), rowRenderer);
+  tables.payer.setRows(rankList(metrics.payers), rowRenderer);
 }
 
 /* ----------------------------------------------------------------------------
- * 11. KUALITAS DATA
+ * 12. KUALITAS DATA (tampilan)
  * --------------------------------------------------------------------------*/
 const SEVERITY = {
   bad: { chip: 'chip-bad', label: 'Kritis', bar: 'bg-red-500', border: 'border-red-100 bg-red-50/60' },
@@ -2657,7 +3276,7 @@ function renderQuality(metrics) {
       ? quality.checks.map((check) => {
         const style = SEVERITY[check.severity] || SEVERITY.info;
         const samples = check.samples.length
-          ? `<ul class="mt-1.5 space-y-0.5 text-[10px] text-gray-500">${check.samples.map((s) => `<li class="truncate" title="${esc(s)}">• ${esc(s)}</li>`).join('')}</ul>`
+          ? `<ul class="mt-1.5 space-y-0.5 text-[10px] text-gray-500">${check.samples.map((sample) => `<li class="truncate" title="${esc(sample)}">• ${esc(sample)}</li>`).join('')}</ul>`
           : '';
         return `<div class="p-3 rounded-lg border ${style.border}">
             <div class="flex flex-wrap items-center gap-2">
@@ -2675,7 +3294,7 @@ function renderQuality(metrics) {
 }
 
 /* ----------------------------------------------------------------------------
- * 12. ASISTEN DATA (rule-based, tanpa model bahasa)
+ * 13. ASISTEN DATA (rule-based, tanpa model bahasa)
  * --------------------------------------------------------------------------*/
 function pushChat(role, html) {
   const log = $('#chat-log');
@@ -2691,79 +3310,120 @@ function pushChat(role, html) {
 
 function answerQuery(query) {
   const q = String(query || '').toLowerCase();
-  const m = state.metrics || computeMetrics(state.view, state.filter, state.config.fxUsdIdr);
+  const m = state.metrics || computeMetrics(state.view, state.filter);
+  const top = rankList(m.payers)[0];
 
-  const spot = (arr, index, mapFn) => (arr[index] ? mapFn(arr[index]) : '—');
+  if (/target|realisasi|capaian/.test(q)) {
+    const evaluation = state.targetEval;
+    if (!evaluation || !evaluation.items.length) {
+      return 'Belum ada target. Tambahkan sheet target di spreadsheet (kolom target, periode, dan satker) agar dashboard bisa membandingkan target dengan realisasi.';
+    }
+    const view = state.valueView;
+    const targetTotal = view === 'USD' ? evaluation.summary.targetUsd : evaluation.summary.targetIdr;
+    const realTotal = view === 'USD' ? evaluation.summary.realUsd : evaluation.summary.realIdr;
+    if (!targetTotal) return `Tidak ada target dalam ${view}. Ganti tombol mata uang atau tambahkan target ${view}.`;
+    const progress = (realTotal / targetTotal) * 100;
+    const worst = evaluation.items
+      .filter((item) => item.currency === view && item.progress != null && item.status === 'behind')
+      .sort((a, b) => a.progress - b.progress)[0];
+    return `Capaian ${view}: <strong>${progress.toFixed(1)}%</strong> (${esc(fmtValue(realTotal))} dari ${esc(fmtValue(targetTotal))}). `
+      + (worst
+        ? `Paling tertinggal: <strong>${esc(worst.label)}</strong> (${worst.progress.toFixed(0)}%).`
+        : 'Tidak ada unit yang berstatus di bawah target.')
+      + (evaluation.mode === 'baseline' ? ' Catatan: pembanding ini dibuat otomatis dari periode sebelumnya, bukan target resmi.' : '');
+  }
 
-  if (/kualitas|quality|valid|error|duplikat|dobel|kosong|missing/.test(q)) {
+  if (/kualitas|valid|error|duplikat|dobel|kosong|missing/.test(q)) {
     const quality = m.quality || runQualityChecks(state.view, m);
     if (!quality.checks.length) return 'Semua pemeriksaan kualitas data lolos. Tidak ada baris bermasalah yang terdeteksi.';
-    const top = quality.checks.slice(0, 3)
-      .map((c) => `<strong>${esc(c.label)}</strong> (${fmtNum(c.count)} baris)`)
+    const topChecks = quality.checks.slice(0, 3)
+      .map((check) => `<strong>${esc(check.label)}</strong> (${fmtNum(check.count)} baris)`)
       .join(', ');
-    return `Skor kualitas data <strong>${quality.score}/100</strong>. Temuan terbesar: ${top}. Detail dan saran perbaikan ada di bagian Kualitas Data.`;
+    return `Skor kualitas data <strong>${quality.score}/100</strong>. Temuan terbesar: ${topChecks}. Detail ada di bagian Kualitas Data.`;
   }
 
   if (/anomali|aneh|outlier|lonjakan/.test(q)) {
     if (!m.anomalies.length) return 'Tidak ada transaksi yang melewati ambang 3 standar deviasi pada filter saat ini.';
-    const top = m.anomalies[0];
-    return `Terdeteksi <strong>${m.anomalies.length}</strong> anomali. Terbesar: <strong>${esc(top.row.payer || '(tanpa nama)')}</strong> `
-      + `sebesar ${esc(fmtAmount(top.row.amount, top.row.currency))} pada ${esc(fmtDateShort(top.row.dateISO))} `
-      + `(z = ${top.z.toFixed(1)}).`;
+    const first = m.anomalies[0];
+    return `Terdeteksi <strong>${m.anomalies.length}</strong> anomali. Terbesar: <strong>${esc(first.row.payer || '(tanpa nama)')}</strong> `
+      + `sebesar ${esc(fmtAmount(first.row.amount, first.row.currency))} pada ${esc(fmtDateShort(first.row.dateISO))} `
+      + `(${esc(first.row.currency)}, z = ${first.z.toFixed(1)}).`;
   }
 
-  if (/proyeksi|forecast|prediksi|bulan depan|tahun depan/.test(q)) {
-    const periods = m.periods.filter((key) => key !== 'Tanpa tanggal');
-    const values = periods.map((key) => (m.series[key] ? m.series[key].eq : 0));
-    const forecast = linearForecast(values, 1);
-    if (!forecast) return 'Data belum cukup (minimal 3 periode) untuk membuat proyeksi.';
+  if (/proyeksi|forecast|prediksi|bulan depan/.test(q)) {
+    const periods = m.periods.filter((period) => period !== 'Tanpa tanggal');
+    if (periods.length < 3) return 'Data belum cukup (minimal 3 periode) untuk membuat proyeksi.';
     const nextKey = nextPeriodKeys(periods[periods.length - 1], state.filter, 1)[0];
-    return `Proyeksi ${esc(fmtPeriodLabel(nextKey))}: <strong>${esc(fmtIDR(forecast.future[0].value))}</strong> `
-      + `(interval 95% ${esc(fmtIDR(forecast.future[0].lower, true))} – ${esc(fmtIDR(forecast.future[0].upper, true))}, R² ${forecast.r2.toFixed(2)}).`;
+    const parts = ['IDR', 'USD'].map((currency) => {
+      const key = currency === 'USD' ? 'usd' : 'idr';
+      const values = periods.map((period) => (m.series[period] ? m.series[period][key] : 0));
+      const forecast = linearForecast(values, 1);
+      if (!forecast) return `${currency}: data belum cukup`;
+      return `${currency}: ${fmtAmount(forecast.future[0].value, currency)} (R² ${forecast.r2.toFixed(2)})`;
+    });
+    return `Proyeksi ${esc(fmtPeriodLabel(nextKey))} — ${parts.join(' · ')}.`;
   }
 
-  if (/tren|naik|turun|pertumbuhan|growth|banding/.test(q)) {
-    const periods = m.periods.filter((key) => key !== 'Tanpa tanggal');
+  if (/tren|naik|turun|pertumbuhan|growth/.test(q)) {
+    const periods = m.periods.filter((period) => period !== 'Tanpa tanggal');
     if (periods.length < 2) return 'Butuh minimal 2 periode untuk membandingkan tren.';
-    const last = m.series[periods[periods.length - 1]].eq;
-    const prev = m.series[periods[periods.length - 2]].eq;
-    const growth = prev > 0 ? ((last - prev) / prev) * 100 : 0;
-    return `Setoran ${esc(fmtPeriodLabel(periods[periods.length - 1]))} sebesar <strong>${esc(fmtIDR(last))}</strong>, `
-      + `${growth >= 0 ? 'naik' : 'turun'} <strong>${fmtPct(growth)}</strong> dibanding ${esc(fmtPeriodLabel(periods[periods.length - 2]))} (${esc(fmtIDR(prev))}).`;
+    const last = periods[periods.length - 1];
+    const prev = periods[periods.length - 2];
+    const growth = (currency) => {
+      const key = currency === 'USD' ? 'usd' : 'idr';
+      const a = m.series[last] ? m.series[last][key] : 0;
+      const b = m.series[prev] ? m.series[prev][key] : 0;
+      if (!b) return `${currency}: —`;
+      return `${currency} ${fmtPct(((a - b) / b) * 100)}`;
+    };
+    return `Perubahan ${esc(fmtPeriodLabel(prev))} → ${esc(fmtPeriodLabel(last))}: ${growth('IDR')} · ${growth('USD')}.`;
   }
 
   if (/satker|stasiun|unit|balai/.test(q)) {
-    return `Ada <strong>${fmtNum(m.satkers.length)}</strong> satker pada filter ini. Teratas: `
-      + spot(m.satkers, 0, (s) => `<strong>${esc(s.name)}</strong> dengan ${esc(fmtIDR(s.eq))} dari ${fmtNum(s.count)} transaksi`) + '.';
+    const best = rankList(m.satkers)[0];
+    return `Ada <strong>${fmtNum(m.satkers.length)}</strong> satker pada filter ini. Teratas (${state.valueView}): `
+      + (best ? `<strong>${esc(best.name)}</strong> dengan ${esc(fmtAmount(valueOfItem(best), state.valueView))} dari ${fmtNum(best.count)} transaksi` : '—') + '.';
   }
 
-  if (/layanan|ntpn|tarif|produk/.test(q)) {
-    return `Ada <strong>${fmtNum(m.layanans.length)}</strong> jenis layanan. Teratas: `
-      + spot(m.layanans, 0, (s) => `<strong>${esc(s.name)}</strong> (${esc(fmtIDR(s.eq))})`) + '.';
+  if (/ntpn/.test(q)) {
+    const best = rankList(m.ntpns)[0];
+    return `Ada <strong>${fmtNum(m.ntpns.length)}</strong> nilai NTPN unik (teks apa adanya). Teratas (${state.valueView}): `
+      + (best ? `<strong>${esc(best.name)}</strong> — ${esc(fmtAmount(valueOfItem(best), state.valueView))}` : '—') + '.';
+  }
+
+  if (/usd|dollar|dolar|valas/.test(q)) {
+    return `Total USD: <strong>${esc(fmtUSD(m.totalUsd))}</strong> dari ${fmtNum(m.usdCount)} transaksi `
+      + `(rata-rata ${esc(fmtUSD(m.avgUsd))}). USD tidak dikonversi ke IDR di dashboard ini.`;
+  }
+
+  if (/idr|rupiah/.test(q)) {
+    return `Total IDR: <strong>${esc(fmtIDR(m.totalIdr))}</strong> dari ${fmtNum(m.idrCount)} transaksi `
+      + `(rata-rata ${esc(fmtIDR(m.avgIdr))}).`;
   }
 
   if (/terbesar|tertinggi|top|paling besar|juara/.test(q)) {
-    return `Wajib bayar terbesar: `
-      + spot(m.payers, 0, (p) => `<strong>${esc(p.name)}</strong> — ${esc(fmtIDR(p.eq))} (${((p.eq / (m.totalEq || 1)) * 100).toFixed(1)}% dari total, ${fmtNum(p.count)} transaksi)`)
-      + '. Satker terbesar: ' + spot(m.satkers, 0, (s) => `<strong>${esc(s.name)}</strong>`) + '.';
+    const bestSatker = rankList(m.satkers)[0];
+    return `Wajib bayar terbesar (${state.valueView}): `
+      + (top ? `<strong>${esc(top.name)}</strong> — ${esc(fmtAmount(valueOfItem(top), state.valueView))} (${fmtNum(top.count)} transaksi)` : '—')
+      + '. Satker terbesar: ' + (bestSatker ? `<strong>${esc(bestSatker.name)}</strong>` : '—') + '.';
   }
 
   if (/terkecil|terendah|paling kecil/.test(q)) {
-    const positive = m.payers.filter((p) => p.eq > 0);
+    const positive = rankList(m.payers).filter((item) => valueOfItem(item) > 0);
     const smallest = positive[positive.length - 1];
     return smallest
-      ? `Kontributor terkecil (masih > 0): <strong>${esc(smallest.name)}</strong> — ${esc(fmtIDR(smallest.eq))}.`
+      ? `Kontributor terkecil (masih > 0) pada ${state.valueView}: <strong>${esc(smallest.name)}</strong> — ${esc(fmtAmount(valueOfItem(smallest), state.valueView))}.`
       : 'Tidak ada kontributor dengan nilai positif.';
   }
 
-  if (/total|revenue|pendapatan|setoran|berapa/.test(q)) {
-    return `Total pada filter saat ini: <strong>${esc(fmtIDR(m.totalIdr))}</strong> (IDR) + `
-      + `<strong>${esc(fmtUSD(m.totalUsd))}</strong> (USD) = ${esc(fmtIDR(m.totalEq))} ekuivalen, `
-      + `dari ${fmtNum(m.count)} transaksi oleh ${fmtNum(m.entities)} wajib bayar.`;
+  if (/total|setoran|pendapatan|berapa/.test(q)) {
+    return `Pada filter ini: IDR <strong>${esc(fmtIDR(m.totalIdr))}</strong> (${fmtNum(m.idrCount)} trx) dan `
+      + `USD <strong>${esc(fmtUSD(m.totalUsd))}</strong> (${fmtNum(m.usdCount)} trx), `
+      + `total ${fmtNum(m.count)} transaksi oleh ${fmtNum(m.entities)} wajib bayar. Kedua mata uang tidak dijumlahkan.`;
   }
 
-  return 'Saya menjawab berdasarkan data yang tampil. Coba kata kunci: <em>total</em>, <em>terbesar</em>, '
-    + '<em>tren</em>, <em>proyeksi</em>, <em>anomali</em>, <em>satker</em>, <em>layanan</em>, atau <em>kualitas data</em>.';
+  return 'Saya menjawab dari data yang tampil. Coba kata kunci: <em>total</em>, <em>IDR</em>, <em>USD</em>, '
+    + '<em>terbesar</em>, <em>tren</em>, <em>proyeksi</em>, <em>target</em>, <em>anomali</em>, <em>satker</em>, <em>NTPN</em>, atau <em>kualitas</em>.';
 }
 
 function handleChatSubmit(value) {
@@ -2774,6 +3434,212 @@ function handleChatSubmit(value) {
   if (input) input.value = '';
   setTimeout(() => pushChat('assistant', answerQuery(text)), 220);
 }
+
+/* ----------------------------------------------------------------------------
+ * 14. RENDER UTAMA
+ * --------------------------------------------------------------------------*/
+function renderAll() {
+  const metrics = computeMetrics(state.view, state.filter);
+  metrics.quality = runQualityChecks(state.view, metrics);
+
+  // Target dinilai terhadap SELURUH baris (bukan hasil pencarian), karena target
+  // adalah angka absolut per satker/periode.
+  let evaluation;
+  if (state.targets.length) {
+    evaluation = evaluateTargets(state.rows, state.targets, state.filter);
+    evaluation.mode = 'sheet';
+  } else {
+    const baseline = buildBaselineTargets(state.rows);
+    evaluation = evaluateTargets(state.rows, baseline.targets, state.filter);
+    evaluation.mode = baseline.targets.length ? 'baseline' : 'none';
+    state.targetsMeta = baseline.meta;
+  }
+
+  state.metrics = metrics;
+  state.targetEval = evaluation;
+
+  ensureTables();
+
+  renderSource(metrics);
+  renderBanner(metrics);
+  renderKpis(metrics);
+  renderForecast(metrics);
+  renderAnomalies(metrics);
+  renderTrend(metrics);
+  renderTopSatker(metrics);
+  renderAkun(metrics);
+  renderCumulative(metrics);
+  renderTopEntity(metrics);
+  renderTables(metrics);
+  renderTargetSection(metrics, evaluation);
+  renderSatkerSection(metrics);
+  renderNtpnSection(metrics);
+  renderPayerSection(metrics);
+  renderQuality(metrics);
+  updateProfileCaption(metrics);
+}
+
+/* ----------------------------------------------------------------------------
+ * 15. PENGATURAN
+ * --------------------------------------------------------------------------*/
+function openSettings() {
+  const dialog = $('#settings-dialog');
+  if (!dialog) return;
+  const cfg = state.config;
+  $('#cfg-endpoint').value = cfg.gasEndpoint || '';
+  $('#cfg-cache').value = cfg.cacheMinutes;
+  $('#cfg-snapshot').checked = !!cfg.useSnapshot;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+function saveSettings() {
+  const endpoint = ($('#cfg-endpoint').value || '').trim();
+  const cache = Number($('#cfg-cache').value);
+  const useSnapshot = $('#cfg-snapshot').checked;
+
+  if (endpoint && !/^https?:\/\//i.test(endpoint)) {
+    toast('Endpoint harus dimulai dengan https://');
+    return;
+  }
+
+  state.config = {
+    ...state.config,
+    gasEndpoint: endpoint,
+    cacheMinutes: Number.isFinite(cache) ? Math.max(0, cache) : DEFAULT_CONFIG.cacheMinutes,
+    useSnapshot,
+  };
+
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(state.config)); } catch (e) { /* abaikan */ }
+  try { sessionStorage.removeItem(CACHE_KEY); } catch (e) { /* abaikan */ }
+
+  const dialog = $('#settings-dialog');
+  if (dialog && dialog.open) dialog.close();
+  loadData({ force: true });
+}
+
+/* ----------------------------------------------------------------------------
+ * 16. EVENT BINDING & BOOT
+ * --------------------------------------------------------------------------*/
+function bindEvents() {
+  const menuItems = $$('.menu-item');
+  menuItems.forEach((item) => {
+    item.addEventListener('click', () => {
+      const target = document.getElementById(item.dataset.target);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  const mainArea = $('#main-scroll-area');
+  if ('IntersectionObserver' in window && mainArea) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        menuItems.forEach((item) => item.classList.toggle('active', item.dataset.target === entry.target.id));
+      });
+    }, { root: mainArea, rootMargin: '-35% 0px -55% 0px', threshold: 0 });
+    ['section-overview', 'section-target', 'section-satker', 'section-ntpn', 'section-payer', 'section-quality']
+      .forEach((id) => { const el = document.getElementById(id); if (el) observer.observe(el); });
+  }
+
+  const search = $('#global-search');
+  if (search) search.addEventListener('input', debounce((event) => updateSearch(event.target.value), 220));
+
+  $$('.filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('.filter-btn').forEach((other) => {
+        other.classList.remove('bg-[#0000CD]/10', 'text-[#0000CD]');
+        other.classList.add('text-gray-600', 'hover:bg-gray-50');
+      });
+      btn.classList.add('bg-[#0000CD]/10', 'text-[#0000CD]');
+      btn.classList.remove('text-gray-600', 'hover:bg-gray-50');
+      setFilter(btn.dataset.filter);
+    });
+  });
+
+  $$('#value-view-toggle .value-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setValueView(btn.dataset.view));
+  });
+
+  const currencyFilter = $('#table-currency-filter');
+  if (currencyFilter) {
+    currencyFilter.addEventListener('change', (event) => {
+      state.currencyFilter = event.target.value;
+      applyView();
+    });
+  }
+
+  const exportBtn = $('#export-btn');
+  if (exportBtn) exportBtn.addEventListener('click', exportTransactions);
+  const qualityExport = $('#quality-export');
+  if (qualityExport) qualityExport.addEventListener('click', exportQuality);
+  const targetExport = $('#target-export');
+  if (targetExport) targetExport.addEventListener('click', exportTargets);
+
+  ['#refresh-btn', '#rs-reload'].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.addEventListener('click', () => loadData({ force: true }));
+  });
+
+  const right = $('#right-sidebar');
+  let rightOpen = true;
+  const toggle = $('#toggle-sidebar');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      rightOpen = !rightOpen;
+      if (!right) return;
+      right.style.display = rightOpen ? '' : 'none';
+      setTimeout(() => Object.values(charts).forEach((chart) => chart && !chart.isDisposed() && chart.resize()), 320);
+    });
+  }
+
+  const print = $('#theme-print');
+  if (print) print.addEventListener('click', () => window.print());
+
+  const scaleBtn = $('#trend-scale-btn');
+  if (scaleBtn) {
+    scaleBtn.addEventListener('click', () => {
+      state.trendLog = !state.trendLog;
+      scaleBtn.textContent = 'Skala: ' + (state.trendLog ? 'Log' : 'Linear');
+      if (state.metrics) renderTrend(state.metrics);
+    });
+  }
+
+  ['#open-settings', '#open-settings-rail'].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.addEventListener('click', openSettings);
+  });
+  const save = $('#cfg-save');
+  if (save) save.addEventListener('click', saveSettings);
+  const reset = $('#cfg-reset');
+  if (reset) {
+    reset.addEventListener('click', () => {
+      try { localStorage.removeItem(CONFIG_KEY); } catch (e) { /* abaikan */ }
+      state.config = { ...DEFAULT_CONFIG };
+      openSettings();
+      toast('Pengaturan dikembalikan ke default. Klik Simpan untuk menerapkan.');
+    });
+  }
+
+  const send = $('#chat-send');
+  if (send) send.addEventListener('click', () => handleChatSubmit());
+  const input = $('#chat-input');
+  if (input) {
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); handleChatSubmit(); }
+    });
+  }
+  $$('.chat-chip').forEach((chip) => {
+    chip.addEventListener('click', () => handleChatSubmit(chip.textContent));
+  });
+}
+
+function boot() {
+  bindEvents();
+  ensureTables();
+  setValueView(state.valueView);
+  loadData();
+}
+
 
 /* ----------------------------------------------------------------------------
  * 13. EXPORT CSV
@@ -2792,18 +3658,33 @@ function downloadCsv(filename, header, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+function exportTargets() {
+  const evaluation = state.targetEval;
+  if (!evaluation || !evaluation.items.length) {
+    toast('Tidak ada target untuk diekspor.');
+    return;
+  }
+  const header = ['TARGET', 'JENIS COCOK', 'PERIODE', 'MATA UANG', 'TARGET', 'REALISASI', 'CAPAIAN %', 'SELISIH', 'STATUS', 'SUMBER'];
+  const rows = evaluation.items.map((item) => [
+    item.label, item.matchType, item.periodKey || 'semua', item.currency, item.target,
+    item.realized, item.progress == null ? '' : item.progress.toFixed(2),
+    item.gap, (TARGET_STATUS[item.status] || TARGET_STATUS.none).label, item.source || '',
+  ]);
+  downloadCsv(`pnbp-target-realisasi-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
+}
+
 function exportTransactions() {
   if (!state.view.length) {
     toast('Tidak ada data untuk diekspor.');
     return;
   }
   const header = [
-    'NAMA WAJIB BAYAR / SETOR', 'TANGGAL BAYAR', 'KODE KL/UNIT/SATKER', 'NTPN (layanan)',
+    'NAMA WAJIB BAYAR / SETOR', 'TANGGAL BAYAR', 'KODE KL/UNIT/SATKER', 'NTPN',
     'NTB/NTP', 'KODE PP', 'KODE TARIF', 'NOMINAL TARIF', 'VOLUME', 'MATA UANG',
     'KODE AKUN', 'SETORAN PER AKUN', 'KETERANGAN',
   ];
   const rows = state.view.map((row) => [
-    row.payer, row.dateISO || row.dateRaw, row.satker, row.layanan, row.ntb, row.kodePP,
+    row.payer, row.dateISO || row.dateRaw, row.satkerRaw, row.ntpn, row.ntb, row.kodePP,
     row.kodeTarif, row.nominalTarif, row.volume, row.currency, row.akun, row.amount, row.keterangan,
   ]);
   const stamp = new Date().toISOString().slice(0, 10);
@@ -2830,204 +3711,7 @@ function exportQuality() {
   downloadCsv(`pnbp-temuan-data-${new Date().toISOString().slice(0, 10)}.csv`, header, rows);
 }
 
-/* ----------------------------------------------------------------------------
- * 14. RENDER UTAMA
- * --------------------------------------------------------------------------*/
-function renderAll() {
-  const metrics = computeMetrics(state.view, state.filter, state.config.fxUsdIdr);
-  metrics.quality = runQualityChecks(state.view, metrics);
-  state.metrics = metrics;
 
-  renderSource(metrics);
-  renderBanner(metrics);
-  renderKpis(metrics);
-  renderForecast(metrics);
-  renderAnomalies(metrics);
-  renderTrend(metrics);
-  renderTopSatker(metrics);
-  renderAkun(metrics);
-  renderCumulative(metrics);
-  renderTopEntity(metrics);
-  renderTables(metrics);
-  renderSatkerSection(metrics);
-  renderLayananSection(metrics);
-  renderPayerSection(metrics);
-  renderQuality(metrics);
-  updateProfileCaption(metrics);
-}
-
-/* ----------------------------------------------------------------------------
- * 15. EVENT BINDING & INISIALISASI
- * --------------------------------------------------------------------------*/
-function openSettings() {
-  const dialog = $('#settings-dialog');
-  if (!dialog) return;
-  const cfg = state.config;
-  $('#cfg-endpoint').value = cfg.gasEndpoint || '';
-  $('#cfg-fx').value = cfg.fxUsdIdr;
-  $('#cfg-cache').value = cfg.cacheMinutes;
-  $('#cfg-snapshot').checked = !!cfg.useSnapshot;
-  if (typeof dialog.showModal === 'function') dialog.showModal();
-}
-
-function saveSettings() {
-  const endpoint = ($('#cfg-endpoint').value || '').trim();
-  const fx = Number($('#cfg-fx').value) || DEFAULT_CONFIG.fxUsdIdr;
-  const cache = Number($('#cfg-cache').value);
-  const useSnapshot = $('#cfg-snapshot').checked;
-
-  if (endpoint && !/^https?:\/\//i.test(endpoint)) {
-    toast('Endpoint harus dimulai dengan https://');
-    return;
-  }
-
-  const next = {
-    ...state.config,
-    gasEndpoint: endpoint,
-    fxUsdIdr: fx > 0 ? fx : DEFAULT_CONFIG.fxUsdIdr,
-    cacheMinutes: Number.isFinite(cache) ? Math.max(0, cache) : DEFAULT_CONFIG.cacheMinutes,
-    useSnapshot,
-  };
-
-  state.config = next;
-  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(next)); } catch (e) { /* abaikan */ }
-  try { sessionStorage.removeItem(CACHE_KEY); } catch (e) { /* abaikan */ }
-
-  const dialog = $('#settings-dialog');
-  if (dialog && dialog.open) dialog.close();
-  loadData({ force: true });
-}
-
-function bindEvents() {
-  // Navigasi + scroll spy
-  const menuItems = $$('.menu-item');
-  menuItems.forEach((item) => {
-    item.addEventListener('click', () => {
-      const target = document.getElementById(item.dataset.target);
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  });
-
-  const mainArea = $('#main-scroll-area');
-  if ('IntersectionObserver' in window && mainArea) {
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        menuItems.forEach((item) => item.classList.toggle('active', item.dataset.target === entry.target.id));
-      });
-    }, { root: mainArea, rootMargin: '-35% 0px -55% 0px', threshold: 0 });
-    ['section-overview', 'section-satker', 'section-layanan', 'section-payer', 'section-quality']
-      .forEach((id) => { const el = document.getElementById(id); if (el) observer.observe(el); });
-  }
-
-  // Pencarian (debounce agar chart tidak dirender tiap ketikan)
-  const search = $('#global-search');
-  if (search) search.addEventListener('input', debounce((event) => updateSearch(event.target.value), 220));
-
-  // Filter periode
-  $$('.filter-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      $$('.filter-btn').forEach((other) => {
-        other.classList.remove('bg-[#0000CD]/10', 'text-[#0000CD]');
-        other.classList.add('text-gray-600', 'hover:bg-gray-50');
-      });
-      btn.classList.add('bg-[#0000CD]/10', 'text-[#0000CD]');
-      btn.classList.remove('text-gray-600', 'hover:bg-gray-50');
-      setFilter(btn.dataset.filter);
-    });
-  });
-
-  // Filter mata uang
-  const currencyFilter = $('#table-currency-filter');
-  if (currencyFilter) {
-    currencyFilter.addEventListener('change', (event) => {
-      state.currency = event.target.value;
-      applyView();
-    });
-  }
-
-  // Export
-  const exportBtn = $('#export-btn');
-  if (exportBtn) exportBtn.addEventListener('click', exportTransactions);
-  const qualityExport = $('#quality-export');
-  if (qualityExport) qualityExport.addEventListener('click', exportQuality);
-
-  // Muat ulang
-  const reload = (force) => loadData({ force: force !== false });
-  ['#refresh-btn', '#rs-reload'].forEach((selector) => {
-    const el = $(selector);
-    if (el) el.addEventListener('click', () => reload(true));
-  });
-
-  // Panel kanan
-  const right = $('#right-sidebar');
-  let rightOpen = true;
-  const applyRight = () => {
-    if (!right) return;
-    right.style.display = rightOpen ? '' : 'none';
-    setTimeout(() => Object.values(charts).forEach((chart) => chart && !chart.isDisposed() && chart.resize()), 320);
-  };
-  const toggle = $('#toggle-sidebar');
-  if (toggle) toggle.addEventListener('click', () => { rightOpen = !rightOpen; applyRight(); });
-
-  // Cetak
-  const print = $('#theme-print');
-  if (print) print.addEventListener('click', () => window.print());
-
-  // Skala tren
-  const scaleBtn = $('#trend-scale-btn');
-  if (scaleBtn) {
-    scaleBtn.addEventListener('click', () => {
-      state.trendLog = !state.trendLog;
-      scaleBtn.textContent = 'Skala: ' + (state.trendLog ? 'Log' : 'Linear');
-      if (state.metrics) renderTrend(state.metrics);
-    });
-  }
-
-  // Pengaturan
-  ['#open-settings', '#open-settings-rail'].forEach((selector) => {
-    const el = $(selector);
-    if (el) el.addEventListener('click', openSettings);
-  });
-  const save = $('#cfg-save');
-  if (save) save.addEventListener('click', saveSettings);
-  const reset = $('#cfg-reset');
-  if (reset) {
-    reset.addEventListener('click', () => {
-      try { localStorage.removeItem(CONFIG_KEY); } catch (e) { /* abaikan */ }
-      state.config = { ...DEFAULT_CONFIG };
-      openSettings();
-      toast('Pengaturan dikembalikan ke default. Klik Simpan untuk menerapkan.');
-    });
-  }
-
-  // Chat
-  const send = $('#chat-send');
-  if (send) send.addEventListener('click', () => handleChatSubmit());
-  const input = $('#chat-input');
-  if (input) {
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') { event.preventDefault(); handleChatSubmit(); }
-    });
-  }
-  $$('.chat-chip').forEach((chip) => {
-    chip.addEventListener('click', () => handleChatSubmit(chip.textContent));
-  });
-}
-
-function boot() {
-  bindEvents();
-  ensureTables();
-  renderAll();
-  loadData();
-}
-
-
-/* ----------------------------------------------------------------------------
- * 16. DATA DEMO
- * Dipakai hanya bila tidak ada sumber live/snapshot. Nilai di bawah adalah
- * contoh (bukan data resmi) agar tampilan tetap bisa dievaluasi.
- * --------------------------------------------------------------------------*/
 const DEMO_ROWS = [
   {
     'NAMA WAJIB BAYAR / SETOR': 'PERUM LPPNPI',
@@ -3317,6 +4001,23 @@ const DEMO_ROWS = [
     'SETORAN PER AKUN': '3750000',
     'KETERANGAN': 'Permohonan data iklim untuk penelitian',
   },
+];
+
+
+/* ----------------------------------------------------------------------------
+ * 16b. DATA TARGET CONTOH
+ * Bentuk sama dengan yang dikirim Code.gs (payload.targets), supaya alur
+ * "target vs realisasi" bisa dicoba sebelum sheet target tersedia.
+ * --------------------------------------------------------------------------*/
+const DEMO_TARGETS = [
+  { label: '436766 - SEKRETARIAT UTAMA BMKG', satkerCode: '436766', dimension: 'satker', period: '2026', currency: 'USD', value: 9000000, source: 'contoh' },
+  { label: '437174 - STASIUN METEOROLOGI SULTAN AJI MUHAMMAD SULAIMAN SEPINGGAN', satkerCode: '437174', dimension: 'satker', period: '2026', currency: 'IDR', value: 5000000, source: 'contoh' },
+  { label: '663839 - STASIUN KLIMATOLOGI LAMPUNG', satkerCode: '663839', dimension: 'satker', period: '2026', currency: 'IDR', value: 8000000, source: 'contoh' },
+  { label: '663843 - STASIUN KLIMATOLOGI NUSA TENGGARA BARAT', satkerCode: '663843', dimension: 'satker', period: '2026', currency: 'IDR', value: 12000000, source: 'contoh' },
+  { label: '663818 - STASIUN METEOROLOGI MARITIM KENDARI', satkerCode: '663818', dimension: 'satker', period: '2026', currency: 'IDR', value: 6000000, source: 'contoh' },
+  { label: '436936 - STASIUN METEOROLOGI SULTAN ISKANDAR MUDA', satkerCode: '436936', dimension: 'satker', period: '2026', currency: 'IDR', value: 4000000, source: 'contoh' },
+  { label: '663800 - STASIUN METEOROLOGI MARITIM TANJUNG PERAK', satkerCode: '663800', dimension: 'satker', period: '2026', currency: 'IDR', value: 3000000, source: 'contoh' },
+  { label: 'Seluruh satker', dimension: 'total', period: '2026', currency: 'IDR', value: 30000000, source: 'contoh' },
 ];
 
 /* ----------------------------------------------------------------------------

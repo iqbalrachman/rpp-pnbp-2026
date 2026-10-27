@@ -12,15 +12,21 @@ Dashboard statis untuk membandingkan layanan pada PP 47/2018 dengan usulan RPP P
 
 ## Dashboard Pembayaran PNBP (GAS + GitHub Pages)
 
-Folder `pnbp-dashboard/` berisi dashboard terpisah untuk memantau setoran PNBP (bukan perbandingan tarif):
+Folder `pnbp-dashboard/` berisi dashboard pemantauan setoran PNBP (terpisah dari analisis tarif di atas):
 
 - `pnbp-dashboard/index.html` — satu file HTML mandiri (Tailwind, ECharts, tanpa build).
-- `pnbp-dashboard/Code.gs` — backend Apps Script yang membaca spreadsheet dan menyajikan HTML/JSON/JSONP.
-- `pnbp-dashboard/data/latest.json` — snapshot contoh sebagai fallback.
-- `pnbp-dashboard/README.md` — langkah deploy GAS, pindah ke GitHub Pages, dan kontrak endpoint.
-- `docs/BRAINSTORM-PNBP.md` — ide analitik, temuan kualitas data, dan rencana kerja.
+- `pnbp-dashboard/Code.gs` — backend Apps Script: membaca sheet transaksi **dan** sheet target, menyajikan HTML/JSON/JSONP.
+- `pnbp-dashboard/data/latest.json` — snapshot **contoh** (bukan data asli) untuk pratinjau.
+- `pnbp-dashboard/README.md` — setup GAS, GitHub Pages, kontrak endpoint, format sheet target.
+- `docs/BRAINSTORM-PNBP.md` — analitik, kualitas data, dan rencana kerja.
 
-Dashboard tersebut dapat dibuka dari URL `/exec` Apps Script maupun sebagai halaman statis GitHub Pages (`/pnbp-dashboard/`). Bila dibuka statis, data diambil dari endpoint GAS lewat JSONP; bila endpoint belum diatur, dashboard memakai snapshot lalu data contoh yang selalu diberi label.
+Aturan yang dipegang:
+
+- **Koneksi data hanya lewat Google Apps Script.** Browser tidak pernah membaca spreadsheet langsung (tidak ada Published CSV/gviz/ID sheet di halaman).
+- **Spreadsheet bersifat credential.** Hanya GAS (`Execute as: Me`) yang membukanya; halaman publik hanya menerima data olahan lewat JSONP.
+- **Tidak ada konversi kurs.** IDR dan USD selalu ditampilkan terpisah — di KPI, tren, proyeksi, peringkat, anomali, dan ekspor.
+- **Target vs realisasi** membaca sheet target apa pun bentuknya (format panjang atau lebar/tahunan), mencocokkan lewat kode satker → nama satker → wajib bayar → NTPN → total, dan menghindari dobel hitung bila ada baris target total.
+- **NTPN ditampilkan apa adanya**, tanpa penggantian label.
 
 ## Menjalankan secara lokal
 
